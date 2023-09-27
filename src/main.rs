@@ -97,7 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut modbus_ctx = modbus_connect().await?;
     let db_conn = db_connect().await?;
 
-    let interval = Duration::from_secs(1);
+    let interval =  env::var("INTERVAL_S")?.parse()?;
+    let interval = Duration::from_secs(interval);
     let mut next_time = Instant::now() + interval;
 
     loop {
@@ -156,7 +157,7 @@ async fn insert(
 
 async fn modbus_connect() -> Result<client::Context, Box<dyn std::error::Error>> {
     let addr = env::var("PV_INV_MODBUS_TCP_ADDRESS")?;
-    let socket_addr = addr.parse().unwrap();
+    let socket_addr = addr.parse()?;
     let modbus_ctx: client::Context = tcp::connect_slave(socket_addr, Slave(1)).await?;
     Ok(modbus_ctx)
 }

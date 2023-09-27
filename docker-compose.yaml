@@ -5,3 +5,4 @@ services:
     environment:
       EDGEDB_DSN:
       PV_INV_MODBUS_TCP_ADDRESS:
+      INTERVAL_S: 1
