@@ -1,0 +1,7 @@
+services:
+  pv-inv-bridge:
+    image: ghcr.io/washed/pv-inv-bridge:latest
+    build: .
+    environment:
+      EDGEDB_DSN:
+      PV_INV_MODBUS_TCP_ADDRESS:
