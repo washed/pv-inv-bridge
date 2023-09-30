@@ -1,10 +1,21 @@
-FROM rust as builder
-WORKDIR /usr/src/app
-COPY . .
-RUN cargo install --path .
+ARG TARGETOS
+ARG TARGETARCH
 
-FROM rust
-# RUN apt-get update && apt-get install -y extra-runtime-dependencies && rm -rf /var/lib/apt/lists/*
-WORKDIR /usr/src/app
-COPY --from=builder /usr/local/cargo/bin/pv-inv-bridge /usr/src/app
-CMD ["/usr/src/app/pv-inv-bridge"]
+FROM --platform=$BUILDPLATFORM rust:1 AS builder
+ARG TARGETPLATFORM
+RUN echo $TARGETPLATFORM
+
+# dummy project to cache deps
+WORKDIR /usr/src
+RUN cargo new pv-inv-bridge
+COPY Cargo.toml Cargo.lock /usr/src/pv-inv-bridge/
+WORKDIR /usr/src/pv-inv-bridge
+RUN cargo build --release
+
+# build with actual source
+COPY src/ /usr/src/pv-inv-bridge/src/
+RUN cargo build --release
+
+FROM rust:1
+COPY --from=builder /usr/src/pv-inv-bridge/target/release/pv-inv-bridge /usr/local/bin
+CMD ["pv-inv-bridge"]
