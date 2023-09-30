@@ -19,6 +19,6 @@ COPY src/ /usr/src/pv-inv-bridge/src/
 RUN touch /usr/src/pv-inv-bridge/src/main.rs
 RUN cargo build --release
 
-FROM rust:1-alpine
+FROM alpine:3
 COPY --from=builder /usr/src/pv-inv-bridge/target/release/pv-inv-bridge /usr/local/bin
 CMD ["pv-inv-bridge"]
