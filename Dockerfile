@@ -1,8 +1,4 @@
-ARG TARGETOS
-ARG TARGETARCH
-
-FROM --platform=$BUILDPLATFORM rust:1-alpine AS builder
-ARG TARGETPLATFORM
+FROM --platform=$TARGETPLATFORM rust:1-alpine AS builder
 RUN echo $TARGETPLATFORM
 
 RUN apk add --no-cache musl-dev
