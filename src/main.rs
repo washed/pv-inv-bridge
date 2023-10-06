@@ -2,11 +2,12 @@ use chrono::prelude::*;
 use edgedb_derive::Queryable;
 use edgedb_protocol::model::Uuid;
 use std::env;
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
+use tokio::task;
+use tokio::time;
 use tokio_modbus::prelude::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct PVInverterData {
     timestamp: DateTime<Utc>,
     device_id: String,
@@ -23,70 +24,6 @@ struct PVInverterData {
     battery_temperature: i16,
 }
 
-/*
-impl From<PVInverterData>
-    for (
-        Value,
-        Value,
-        f32,
-        f32,
-        i16,
-        f32,
-        i32,
-        i32,
-        i32,
-        i16,
-        i16,
-        i16,
-        // i16,
-    )
-{
-    fn from(
-        e: PVInverterData,
-    ) -> (
-        Value,
-        Value,
-        f32,
-        f32,
-        i16,
-        f32,
-        i32,
-        i32,
-        i32,
-        i16,
-        i16,
-        i16,
-        // i16,
-    ) {
-        let mut timestamp = e.timestamp.to_rfc3339();
-        // timestamp.push('\"');
-        // timestamp.insert(0, '\"');
-        let timestamp = Value::from(timestamp);
-
-        let mut device_id = e.device_id.clone();
-        // device_id.push('\"');
-        // device_id.insert(0, '\"');
-        let device_id = Value::from(device_id);
-
-        (
-            timestamp,
-            device_id,
-            e.grid_voltage,
-            e.grid_current,
-            e.grid_power,
-            e.grid_frequency,
-            e.pv_power_1,
-            e.pv_power_2,
-            e.feedin_power,
-            e.battery_charge_power,
-            e.battery_soc,
-            e.radiator_temperature,
-            // e.battery_temperature,
-        )
-    }
-}
-*/
-
 #[derive(Debug, Queryable)]
 pub struct QueryableInsertResponse {
     pub id: Uuid,
@@ -94,44 +31,50 @@ pub struct QueryableInsertResponse {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut modbus_ctx = modbus_connect().await?;
-    let db_conn = db_connect().await?;
+    let (modbus_broadcast_tx, mut modbus_broadcast_rx_inserter) =
+        broadcast::channel::<PVInverterData>(16);
 
-    let interval =  env::var("INTERVAL_S")?.parse()?;
-    let interval = Duration::from_secs(interval);
-    let mut next_time = Instant::now() + interval;
+    let inserter_task = start_insert_inverter_tak(modbus_broadcast_rx_inserter);
+    let inverter_task = start_get_inverter_task(modbus_broadcast_tx);
 
-    loop {
-        let data = get_modbus_stuff(&mut modbus_ctx).await?;
-        println!("{:#?}", data);
-        insert(&db_conn, data).await?;
-        sleep(next_time - Instant::now());
-        next_time += interval;
-    }
+    inverter_task.await?;
+
+    Ok(())
+}
+
+fn start_insert_inverter_tak(mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>) {
+    tokio::spawn(async move {
+        let db_conn = db_connect().await.unwrap();
+
+        loop {
+            let data = modbus_broadcast_rx.recv().await.unwrap();
+            insert(&db_conn, data).await.unwrap();
+        }
+    });
+}
+
+fn start_get_inverter_task(
+    modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
+) -> task::JoinHandle<()> {
+    task::spawn(async move {
+        let mut modbus_ctx = modbus_connect().await.unwrap();
+
+        let interval = env::var("INTERVAL_S").unwrap().parse().unwrap();
+        let mut interval = time::interval(time::Duration::from_secs(interval));
+
+        loop {
+            interval.tick().await;
+            let data: PVInverterData = get_modbus_stuff(&mut modbus_ctx).await.unwrap();
+            println!("modbus rx");
+            modbus_broadcast_tx.send(data).unwrap();
+        }
+    })
 }
 
 async fn insert(
     db_conn: &edgedb_tokio::Client,
     data: PVInverterData,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    /*
-    let args = <(
-        Value,
-        Value,
-        f32,
-        f32,
-        i16,
-        f32,
-        i32,
-        i32,
-        i32,
-        i16,
-        i16,
-        i16,
-        // i16,
-    )>::from(data);
-    */
-
     let query = format!("INSERT PVInverter {{
         timestamp := <datetime>\"{}\",
         device := (insert Device {{ device_id := <str>\"{}\" }} unless conflict on .device_id else (select Device)),
@@ -152,6 +95,7 @@ async fn insert(
     data.feedin_power, data.battery_charge_power, data.battery_soc,
     data.radiator_temperature, data.battery_temperature);
     db_conn.execute(&query, &()).await?;
+    println!("Inserted {:#?}", data);
     Ok(0)
 }
 
@@ -174,7 +118,7 @@ async fn db_connect() -> Result<edgedb_tokio::Client, Box<dyn std::error::Error>
 
 async fn get_modbus_stuff(
     modbus_ctx: &mut client::Context,
-) -> Result<PVInverterData, Box<dyn std::error::Error>> {
+) -> Result<PVInverterData, std::io::Error> {
     Ok(PVInverterData {
         timestamp: Utc::now(),
         device_id: get_serial_number(modbus_ctx).await?,
@@ -194,7 +138,7 @@ async fn get_modbus_stuff(
 
 async fn get_battery_charge_voltage(
     modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0014, 1).await?[0] as i16;
     let value = f32::from(value);
     Ok(value / 10.0)
@@ -202,150 +146,114 @@ async fn get_battery_charge_voltage(
 
 async fn get_battery_charge_current(
     modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0015, 1).await?[0] as i16;
     let value = f32::from(value);
     Ok(value / 10.0)
 }
 
-async fn get_battery_charge_power(
-    modbus_ctx: &mut client::Context,
-) -> Result<i16, Box<dyn std::error::Error>> {
+async fn get_battery_charge_power(modbus_ctx: &mut client::Context) -> Result<i16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x0016, 1).await?[0] as i16)
 }
 
-async fn get_battery_soc(
-    modbus_ctx: &mut client::Context,
-) -> Result<i16, Box<dyn std::error::Error>> {
+async fn get_battery_soc(modbus_ctx: &mut client::Context) -> Result<i16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x001c, 1).await?[0] as i16)
 }
 
 async fn get_battery_discharge_max_current(
     modbus_ctx: &mut client::Context,
-) -> Result<i16, Box<dyn std::error::Error>> {
+) -> Result<i16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x0025, 1).await?[0] as i16)
 }
 
-async fn get_battery_power_all(
-    modbus_ctx: &mut client::Context,
-) -> Result<i32, Box<dyn std::error::Error>> {
+async fn get_battery_power_all(modbus_ctx: &mut client::Context) -> Result<i32, std::io::Error> {
     let result = modbus_ctx.read_input_registers(0x01FA, 2).await?;
     Ok(((result[1] as i32) << 16) | result[0] as i32)
 }
 
 async fn get_battery_charge_discharge_power(
     modbus_ctx: &mut client::Context,
-) -> Result<i32, Box<dyn std::error::Error>> {
+) -> Result<i32, std::io::Error> {
     let result = modbus_ctx.read_input_registers(0x0114, 2).await?;
     Ok(((result[1] as i32) << 16) | result[0] as i32)
 }
 
-async fn get_feedin_power(
-    modbus_ctx: &mut client::Context,
-) -> Result<i32, Box<dyn std::error::Error>> {
+async fn get_feedin_power(modbus_ctx: &mut client::Context) -> Result<i32, std::io::Error> {
     let result = modbus_ctx.read_input_registers(0x0046, 2).await?;
     Ok(((result[1] as i32) << 16) | result[0] as i32)
 }
 
-async fn get_battery_temperature(
-    modbus_ctx: &mut client::Context,
-) -> Result<i16, Box<dyn std::error::Error>> {
+async fn get_battery_temperature(modbus_ctx: &mut client::Context) -> Result<i16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x0018, 1).await?[0] as i16)
 }
 
-async fn get_user_soc(modbus_ctx: &mut client::Context) -> Result<u16, Box<dyn std::error::Error>> {
+async fn get_user_soc(modbus_ctx: &mut client::Context) -> Result<u16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x00BE, 1).await?[0])
 }
 
-async fn get_radiator_temperature(
-    modbus_ctx: &mut client::Context,
-) -> Result<i16, Box<dyn std::error::Error>> {
+async fn get_radiator_temperature(modbus_ctx: &mut client::Context) -> Result<i16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x0008, 1).await?[0] as i16)
 }
 
-async fn get_pv_power_1(
-    modbus_ctx: &mut client::Context,
-) -> Result<u16, Box<dyn std::error::Error>> {
+async fn get_pv_power_1(modbus_ctx: &mut client::Context) -> Result<u16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x000A, 1).await?[0])
 }
 
-async fn get_pv_power_2(
-    modbus_ctx: &mut client::Context,
-) -> Result<u16, Box<dyn std::error::Error>> {
+async fn get_pv_power_2(modbus_ctx: &mut client::Context) -> Result<u16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x000B, 1).await?[0])
 }
 
-async fn get_pv_voltage_1(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_pv_voltage_1(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0003, 1).await?[0];
     let value = f32::from(value);
     Ok(value / 10.0)
 }
 
-async fn get_pv_voltage_2(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_pv_voltage_2(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0004, 1).await?[0];
     let value = f32::from(value);
     Ok(value / 10.0)
 }
 
-async fn get_pv_current_1(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_pv_current_1(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0005, 1).await?[0];
     let value = f32::from(value);
     Ok(value / 10.0)
 }
 
-async fn get_pv_current_2(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_pv_current_2(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0006, 1).await?[0];
     let value = f32::from(value);
     Ok(value / 10.0)
 }
 
-async fn get_grid_current(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_grid_current(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0001, 1).await?[0];
     let value = f32::from(value as i16);
     Ok(value / 10.0)
 }
 
-async fn get_grid_power(
-    modbus_ctx: &mut client::Context,
-) -> Result<i16, Box<dyn std::error::Error>> {
+async fn get_grid_power(modbus_ctx: &mut client::Context) -> Result<i16, std::io::Error> {
     Ok(modbus_ctx.read_input_registers(0x0002, 1).await?[0] as i16)
 }
 
-async fn get_grid_frequency(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_grid_frequency(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0007, 1).await?[0];
     let value = f32::from(value);
     Ok(value / 100.0)
 }
 
-async fn get_grid_voltage(
-    modbus_ctx: &mut client::Context,
-) -> Result<f32, Box<dyn std::error::Error>> {
+async fn get_grid_voltage(modbus_ctx: &mut client::Context) -> Result<f32, std::io::Error> {
     let value = modbus_ctx.read_input_registers(0x0000, 1).await?[0];
     let value = f32::from(value);
     Ok(value / 10.0)
 }
 
-async fn get_machine_type(
-    modbus_ctx: &mut client::Context,
-) -> Result<u16, Box<dyn std::error::Error>> {
+async fn get_machine_type(modbus_ctx: &mut client::Context) -> Result<u16, std::io::Error> {
     Ok(modbus_ctx.read_holding_registers(0x0105, 1).await?[0])
 }
 
-async fn get_serial_number(
-    modbus_ctx: &mut client::Context,
-) -> Result<String, Box<dyn std::error::Error>> {
+async fn get_serial_number(modbus_ctx: &mut client::Context) -> Result<String, std::io::Error> {
     let result = modbus_ctx.read_holding_registers(0x0, 7).await?;
     Ok(modbus_to_str(&result))
 }
