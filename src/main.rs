@@ -4,6 +4,7 @@ use edgedb_protocol::model::Uuid;
 use std::env;
 use tokio::sync::broadcast;
 use tokio::task;
+use tokio::task::JoinSet;
 use tokio::time;
 use tokio_modbus::prelude::*;
 
@@ -31,19 +32,26 @@ pub struct QueryableInsertResponse {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (modbus_broadcast_tx, mut modbus_broadcast_rx_inserter) =
+    let mut join_set = JoinSet::new();
+
+    let (modbus_broadcast_tx, modbus_broadcast_rx_inserter) =
         broadcast::channel::<PVInverterData>(16);
 
-    let inserter_task = start_insert_inverter_tak(modbus_broadcast_rx_inserter);
-    let inverter_task = start_get_inverter_task(modbus_broadcast_tx);
+    start_insert_inverter_tak(&mut join_set, modbus_broadcast_rx_inserter);
+    start_get_inverter_task(&mut join_set, modbus_broadcast_tx);
 
-    inverter_task.await?;
+    while let Some(res) = join_set.join_next().await {
+        println!("Task finished unexpectedly!");
+    }
 
     Ok(())
 }
 
-fn start_insert_inverter_tak(mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>) {
-    tokio::spawn(async move {
+fn start_insert_inverter_tak(
+    join_set: &mut JoinSet<()>,
+    mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
+) {
+    join_set.spawn(async move {
         let db_conn = db_connect().await.unwrap();
 
         loop {
@@ -54,9 +62,10 @@ fn start_insert_inverter_tak(mut modbus_broadcast_rx: broadcast::Receiver<PVInve
 }
 
 fn start_get_inverter_task(
+    join_set: &mut JoinSet<()>,
     modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
-) -> task::JoinHandle<()> {
-    task::spawn(async move {
+) {
+    join_set.spawn(async move {
         let mut modbus_ctx = modbus_connect().await.unwrap();
 
         let interval = env::var("INTERVAL_S").unwrap().parse().unwrap();
@@ -68,7 +77,7 @@ fn start_get_inverter_task(
             println!("modbus rx");
             modbus_broadcast_tx.send(data).unwrap();
         }
-    })
+    });
 }
 
 async fn insert(
