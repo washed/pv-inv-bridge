@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
 
     let app = Router::new()
-        .route("/sse", get(sse_handler))
+        .route("/stream", get(sse_handler))
         .with_state(state);
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
