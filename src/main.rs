@@ -80,7 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/stream", get(sse_handler))
         .with_state(state);
 
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+
+    let bind_address: std::net::SocketAddr = env::var("BIND_ADDRESS").unwrap().parse().unwrap();
+    axum::Server::bind(&bind_address)
         .serve(app.into_make_service())
         .await
         .unwrap();
