@@ -100,14 +100,22 @@ async fn sse_handler(
     println!("`{}` connected", user_agent.as_str());
     let modbus_broadcast_sse_rx = state.modbus_broadcast_tx.subscribe();
     let stream = BroadcastStream::new(modbus_broadcast_sse_rx)
-        .filter_map(|x| {
-            match {
-                let x = x.unwrap();
-                Event::default().json_data(x)
-            } {
-                Ok(foo) => Some(foo),
-                Err(_) => None,
+        .chunks_timeout(5, Duration::from_secs(5))
+        .map(|x| {
+            let mut battery_charge_power_sum: f64 = 0.0;
+
+            for datum in x.iter() {
+                let foo = datum.as_ref().unwrap();
+                battery_charge_power_sum += f64::from(foo.battery_charge_power);
             }
+
+            let mut res = x.last().unwrap().clone().unwrap();
+            res.battery_charge_power = (battery_charge_power_sum / x.len() as f64).round() as i16;
+            res
+        })
+        .filter_map(|x| match { Event::default().json_data(x) } {
+            Ok(foo) => Some(foo),
+            Err(_) => None,
         })
         .map(Ok);
 
