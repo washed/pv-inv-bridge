@@ -80,7 +80,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/stream", get(sse_handler))
         .with_state(state);
 
-
     let bind_address: std::net::SocketAddr = env::var("BIND_ADDRESS").unwrap().parse().unwrap();
     axum::Server::bind(&bind_address)
         .serve(app.into_make_service())
@@ -102,7 +101,7 @@ async fn sse_handler(
     println!("`{}` connected", user_agent.as_str());
     let modbus_broadcast_sse_rx = state.modbus_broadcast_tx.subscribe();
     let stream = BroadcastStream::new(modbus_broadcast_sse_rx)
-        .chunks_timeout(5, Duration::from_secs(5))
+        .chunks_timeout(1, Duration::from_secs(10))
         .map(|x| {
             let mut battery_charge_power_sum: f64 = 0.0;
 
