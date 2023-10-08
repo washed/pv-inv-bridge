@@ -1,13 +1,3 @@
-use chrono::prelude::*;
-use edgedb_derive::Queryable;
-use edgedb_protocol::model::Uuid;
-use std::env;
-use tokio::net::unix::pipe::Receiver;
-use tokio::sync::broadcast;
-use tokio::task::JoinSet;
-use tokio::time;
-use tokio_modbus::prelude::*;
-
 use axum::headers;
 use axum::{
     debug_handler,
@@ -16,13 +6,19 @@ use axum::{
     routing::get,
     Router, TypedHeader,
 };
-use futures::stream::{self, Stream};
+use chrono::prelude::*;
+use edgedb_derive::Queryable;
+use edgedb_protocol::model::Uuid;
+use futures::stream::Stream;
+use serde::Serialize;
+use std::env;
 use std::{convert::Infallible, time::Duration};
+use tokio::sync::broadcast;
+use tokio::task::JoinSet;
+use tokio::time;
+use tokio_modbus::prelude::*;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
-// use tower_http::{services::ServeDir, trace::TraceLayer};
-// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Debug)]
 pub struct PVInverterData {
@@ -68,13 +64,14 @@ pub struct AppState {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut join_set = JoinSet::new();
-
     let (modbus_broadcast_tx, modbus_broadcast_rx_inserter) =
         broadcast::channel::<PVInverterData>(16);
+
     let state = AppState {
         modbus_broadcast_tx: modbus_broadcast_tx,
     };
+
+    let mut join_set = JoinSet::new();
 
     start_insert_inverter_task(&mut join_set, modbus_broadcast_rx_inserter);
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
@@ -101,14 +98,6 @@ async fn sse_handler(
     TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     println!("`{}` connected", user_agent.as_str());
-
-    // A `Stream` that repeats an event every second
-    //
-    // You can also create streams from tokio channels using the wrappers in
-    // https://docs.rs/tokio-stream
-    // let stream = stream::repeat_with(|| Event::default().data("hi!"))
-    //     .map(Ok)
-    //     .throttle(Duration::from_secs(1));
     let modbus_broadcast_sse_rx = state.modbus_broadcast_tx.subscribe();
     let stream = BroadcastStream::new(modbus_broadcast_sse_rx)
         .filter_map(|x| {
@@ -121,8 +110,6 @@ async fn sse_handler(
             }
         })
         .map(Ok);
-
-    // let j = serde_json::to_string(&address)?;
 
     Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
