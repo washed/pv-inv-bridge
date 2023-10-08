@@ -123,12 +123,12 @@ fn start_insert_inverter_task(
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        // let db_conn = db_connect().await.unwrap();
+        let db_conn = db_connect().await.unwrap();
 
         loop {
             let data = modbus_broadcast_rx.recv().await.unwrap();
             println!("{:#?}", data);
-            // insert(&db_conn, data).await.unwrap();
+            insert(&db_conn, data).await.unwrap();
         }
     });
 }
