@@ -12,3 +12,8 @@ edgedb-tokio = "0.5.0"
 edgedb-protocol = "0.6.0"
 edgedb-derive = "0.5.1"
 chrono = "0.4.31"
+axum = { version = "0.6.20", features = ["headers", "macros"] }
+futures = "0.3"
+tokio-stream = { version = "0.1.14", features = ["sync"] }
+serde = "1.0.188"
+serde_json = "1.0.107"

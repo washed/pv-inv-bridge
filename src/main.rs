@@ -2,15 +2,31 @@ use chrono::prelude::*;
 use edgedb_derive::Queryable;
 use edgedb_protocol::model::Uuid;
 use std::env;
+use tokio::net::unix::pipe::Receiver;
 use tokio::sync::broadcast;
-use tokio::task;
 use tokio::task::JoinSet;
 use tokio::time;
 use tokio_modbus::prelude::*;
 
-#[derive(Clone, Debug)]
-struct PVInverterData {
-    timestamp: DateTime<Utc>,
+use axum::headers;
+use axum::{
+    debug_handler,
+    extract::State,
+    response::sse::{Event, Sse},
+    routing::get,
+    Router, TypedHeader,
+};
+use futures::stream::{self, Stream};
+use std::{convert::Infallible, time::Duration};
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt as _;
+// use tower_http::{services::ServeDir, trace::TraceLayer};
+// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Debug)]
+pub struct PVInverterData {
+    timestamp: DateTimeSerializable,
     device_id: String,
     grid_voltage: f32,
     grid_current: f32,
@@ -25,9 +41,29 @@ struct PVInverterData {
     battery_temperature: i16,
 }
 
+#[derive(Debug, Clone)]
+struct DateTimeSerializable(DateTime<Utc>);
+
+impl Serialize for DateTimeSerializable {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.0.to_rfc3339().as_str())
+    }
+}
+
+impl From<DateTime<Utc>> for DateTimeSerializable {
+    fn from(val: DateTime<Utc>) -> DateTimeSerializable {
+        DateTimeSerializable { 0: val }
+    }
+}
+
 #[derive(Debug, Queryable)]
 pub struct QueryableInsertResponse {
     pub id: Uuid,
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -36,9 +72,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (modbus_broadcast_tx, modbus_broadcast_rx_inserter) =
         broadcast::channel::<PVInverterData>(16);
+    let state = AppState {
+        modbus_broadcast_tx: modbus_broadcast_tx,
+    };
 
-    start_insert_inverter_tak(&mut join_set, modbus_broadcast_rx_inserter);
-    start_get_inverter_task(&mut join_set, modbus_broadcast_tx);
+    start_insert_inverter_task(&mut join_set, modbus_broadcast_rx_inserter);
+    start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
+
+    let app = Router::new()
+        .route("/sse", get(sse_handler))
+        .with_state(state);
+
+    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 
     while let Some(res) = join_set.join_next().await {
         println!("Task finished unexpectedly!");
@@ -47,16 +95,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn start_insert_inverter_tak(
+#[debug_handler]
+async fn sse_handler(
+    State(state): State<AppState>,
+    TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    println!("`{}` connected", user_agent.as_str());
+
+    // A `Stream` that repeats an event every second
+    //
+    // You can also create streams from tokio channels using the wrappers in
+    // https://docs.rs/tokio-stream
+    // let stream = stream::repeat_with(|| Event::default().data("hi!"))
+    //     .map(Ok)
+    //     .throttle(Duration::from_secs(1));
+    let modbus_broadcast_sse_rx = state.modbus_broadcast_tx.subscribe();
+    let stream = BroadcastStream::new(modbus_broadcast_sse_rx)
+        .filter_map(|x| {
+            match {
+                let x = x.unwrap();
+                Event::default().json_data(x)
+            } {
+                Ok(foo) => Some(foo),
+                Err(_) => None,
+            }
+        })
+        .map(Ok);
+
+    // let j = serde_json::to_string(&address)?;
+
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(1))
+            .text("keep-alive-text"),
+    )
+}
+
+fn start_insert_inverter_task(
     join_set: &mut JoinSet<()>,
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        let db_conn = db_connect().await.unwrap();
+        // let db_conn = db_connect().await.unwrap();
 
         loop {
             let data = modbus_broadcast_rx.recv().await.unwrap();
-            insert(&db_conn, data).await.unwrap();
+            println!("{:#?}", data);
+            // insert(&db_conn, data).await.unwrap();
         }
     });
 }
@@ -99,7 +184,7 @@ async fn insert(
         radiator_temperature := <int16>{},
         battery_temperature := <int16>{}
     }}",
-    data.timestamp.to_rfc3339(), data.device_id, data.grid_voltage, data.grid_current,
+    data.timestamp.0.to_rfc3339(), data.device_id, data.grid_voltage, data.grid_current,
     data.grid_power, data.grid_frequency, data.pv_power_1, data.pv_power_2,
     data.feedin_power, data.battery_charge_power, data.battery_soc,
     data.radiator_temperature, data.battery_temperature);
@@ -129,7 +214,7 @@ async fn get_modbus_stuff(
     modbus_ctx: &mut client::Context,
 ) -> Result<PVInverterData, std::io::Error> {
     Ok(PVInverterData {
-        timestamp: Utc::now(),
+        timestamp: Utc::now().into(),
         device_id: get_serial_number(modbus_ctx).await?,
         grid_voltage: get_grid_voltage(modbus_ctx).await?,
         grid_current: get_grid_current(modbus_ctx).await?,
