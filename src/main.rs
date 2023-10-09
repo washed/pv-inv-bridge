@@ -75,19 +75,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
 
-    let app = Router::new()
-        .route("/stream", get(sse_handler))
-        .with_state(state);
-
-    let bind_address: std::net::SocketAddr = env::var("BIND_ADDRESS").unwrap().parse().unwrap();
-    axum::Server::bind(&bind_address)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    start_server(state).await?;
 
     while let Some(res) = join_set.join_next().await {
         println!("Task finished unexpectedly!");
     }
+
+    Ok(())
+}
+
+async fn start_server(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
+    let app = Router::new()
+        .route("/stream", get(sse_handler))
+        .with_state(state);
+
+    let bind_address: std::net::SocketAddr = env::var("BIND_ADDRESS")?.parse()?;
+    axum::Server::bind(&bind_address)
+        .serve(app.into_make_service())
+        .await?;
 
     Ok(())
 }
@@ -141,9 +146,13 @@ fn start_insert_inverter_task(
 
         {
             loop {
-                let data = modbus_broadcast_rx.recv().await.unwrap();
-                println!("{:#?}", data);
-                insert(&db_conn, data).await.unwrap();
+                match modbus_broadcast_rx.recv().await {
+                    Ok(data) => match insert(&db_conn, data).await {
+                        Ok(res) => println!("Inserted object {res}"),
+                        Err(e) => eprintln!("Error inserting object into db: {e}"),
+                    },
+                    Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
+                }
             }
         }
     });
@@ -154,17 +163,44 @@ fn start_get_inverter_task(
     modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        let mut modbus_ctx = modbus_connect().await.unwrap();
+        let mut modbus_ctx = match modbus_connect().await {
+            Ok(modbus_ctx) => modbus_ctx,
+            Err(e) => {
+                eprintln!("Error connecting to modbus! {e}");
+                return;
+            }
+        };
 
-        let interval = env::var("INTERVAL_S").unwrap().parse().unwrap();
+        let interval = match env::var("INTERVAL_S") {
+            Ok(res) => match res.parse::<u64>() {
+                Ok(res) => res,
+                Err(e) => {
+                    eprintln!("Error parsing INTERVAL_S: {e}");
+                    return;
+                }
+            },
+            Err(e) => {
+                println!("Error getting INTERVAL_S from env var: {e}");
+                return;
+            }
+        };
         let mut interval = time::interval(time::Duration::from_secs(interval));
 
         loop {
             interval.tick().await;
-            let data: PVInverterData = get_modbus_stuff(&mut modbus_ctx).await.unwrap();
-            println!("modbus rx");
+            let data: PVInverterData = match get_modbus_stuff(&mut modbus_ctx).await {
+                Ok(data) => {
+                    println!("modbus rx");
+                    data
+                }
+                Err(e) => {
+                    eprintln!("Error getting modbus data: {e}");
+                    return;
+                }
+            };
+
             match modbus_broadcast_tx.send(data) {
-                Ok(res) => println!("sent modbus data into stream"),
+                Ok(_res) => println!("sent modbus data into stream"),
                 Err(e) => eprintln!("error sending data into stream: {e}"),
             }
         }
