@@ -6,8 +6,6 @@ use axum::{
     routing::get,
     Router, TypedHeader,
 };
-use edgedb_derive::Queryable;
-use edgedb_protocol::model::Uuid;
 use futures::stream::Stream;
 use std::env;
 use std::{convert::Infallible, time::Duration};
@@ -20,10 +18,8 @@ use tokio_stream::StreamExt as _;
 mod inverter;
 use inverter::{PVInverter, PVInverterData};
 
-#[derive(Debug, Queryable)]
-pub struct QueryableInsertResponse {
-    pub id: Uuid,
-}
+mod db;
+use db::DBInserter;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -104,8 +100,8 @@ fn start_insert_inverter_task(
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        let db_conn = match db_connect().await {
-            Ok(db_conn) => db_conn,
+        let db_inserter = match DBInserter::new().await {
+            Ok(db_inserter) => db_inserter,
             Err(e) => {
                 eprintln!("Error connecting to database: {e}");
                 return;
@@ -115,7 +111,7 @@ fn start_insert_inverter_task(
         {
             loop {
                 match modbus_broadcast_rx.recv().await {
-                    Ok(data) => match insert(&db_conn, data).await {
+                    Ok(data) => match db_inserter.insert_pv_inverter_data(data).await {
                         Ok(res) => println!("Inserted object {res}"),
                         Err(e) => eprintln!("Error inserting object into db: {e}"),
                     },
@@ -173,42 +169,4 @@ fn start_get_inverter_task(
             }
         }
     });
-}
-
-async fn insert(
-    db_conn: &edgedb_tokio::Client,
-    data: PVInverterData,
-) -> Result<i32, Box<dyn std::error::Error>> {
-    let query = format!("INSERT PVInverter {{
-        timestamp := <datetime>\"{}\",
-        device := (insert Device {{ device_id := <str>\"{}\" }} unless conflict on .device_id else (select Device)),
-        grid_voltage := <float32>{},
-        grid_current := <float32>{},
-        grid_power := <float32>{},
-        grid_frequency := <float32>{},
-        pv_power_1 := <int32>{},
-        pv_power_2 := <int32>{},
-        feedin_power := <int32>{},
-        battery_charge_power := <int16>{},
-        battery_soc := <int16>{},
-        radiator_temperature := <int16>{},
-        battery_temperature := <int16>{}
-    }}",
-    data.timestamp.0.to_rfc3339(), data.device_id, data.grid_voltage, data.grid_current,
-    data.grid_power, data.grid_frequency, data.pv_power_1, data.pv_power_2,
-    data.feedin_power, data.battery_charge_power, data.battery_soc,
-    data.radiator_temperature, data.battery_temperature);
-    db_conn.execute(&query, &()).await?;
-    println!("Inserted {:#?}", data);
-    Ok(0)
-}
-
-async fn db_connect() -> Result<edgedb_tokio::Client, Box<dyn std::error::Error>> {
-    let edgedb_dsn = env::var("EDGEDB_DSN")?;
-    let mut builder = edgedb_tokio::Builder::new();
-    builder.dsn(edgedb_dsn.as_str())?;
-    let config = builder.build_env().await?;
-    let conn = edgedb_tokio::Client::new(&config);
-    conn.ensure_connected().await?;
-    Ok(conn)
 }
