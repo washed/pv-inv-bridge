@@ -64,8 +64,7 @@ pub struct AppState {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (modbus_broadcast_tx, modbus_broadcast_rx_inserter) =
-        broadcast::channel::<PVInverterData>(16);
+    let (modbus_broadcast_tx, _modbus_broadcast_rx) = broadcast::channel::<PVInverterData>(16);
 
     let state = AppState {
         modbus_broadcast_tx: modbus_broadcast_tx,
@@ -73,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut join_set = JoinSet::new();
 
-    start_insert_inverter_task(&mut join_set, modbus_broadcast_rx_inserter);
+    start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
 
     let app = Router::new()
@@ -132,12 +131,20 @@ fn start_insert_inverter_task(
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        let db_conn = db_connect().await.unwrap();
+        let db_conn = match db_connect().await {
+            Ok(db_conn) => db_conn,
+            Err(e) => {
+                eprintln!("Error connecting to database: {e}");
+                return;
+            }
+        };
 
-        loop {
-            let data = modbus_broadcast_rx.recv().await.unwrap();
-            println!("{:#?}", data);
-            insert(&db_conn, data).await.unwrap();
+        {
+            loop {
+                let data = modbus_broadcast_rx.recv().await.unwrap();
+                println!("{:#?}", data);
+                insert(&db_conn, data).await.unwrap();
+            }
         }
     });
 }
@@ -156,7 +163,10 @@ fn start_get_inverter_task(
             interval.tick().await;
             let data: PVInverterData = get_modbus_stuff(&mut modbus_ctx).await.unwrap();
             println!("modbus rx");
-            modbus_broadcast_tx.send(data).unwrap();
+            match modbus_broadcast_tx.send(data) {
+                Ok(res) => println!("sent modbus data into stream"),
+                Err(e) => eprintln!("error sending data into stream: {e}"),
+            }
         }
     });
 }
