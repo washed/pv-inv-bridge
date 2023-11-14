@@ -35,6 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         modbus_broadcast_tx: modbus_broadcast_tx,
     };
 
+    get_forecast().await?;
+
     let mut join_set = JoinSet::new();
 
     start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
@@ -46,6 +48,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Task finished unexpectedly!");
     }
 
+    Ok(())
+}
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SolcastForecasts {
+    forecasts: Vec<SolcastForecast>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SolcastForecast {
+    period: String,
+    period_end: DateTime<Utc>,
+    pv_estimate: f32,
+    pv_estimate10: f32,
+    pv_estimate90: f32,
+}
+
+async fn get_forecast() -> Result<(), Box<dyn std::error::Error>> {
+    let api_key: String = env::var("SOLCAST_API_KEY")?;
+    let resource_id_south: String = env::var("SOLCAST_RSRC_ID_SOUTH")?;
+    let resource_id_north: String = env::var("SOLCAST_RSRC_ID_NORTH")?;
+    let url = format!(
+        "https://api.solcast.com.au/rooftop_sites/{resource_id_south}/forecasts?format=json"
+    );
+
+    println!("{:#?}", url);
+
+    let resp: SolcastForecasts = reqwest::Client::new()
+        .get(url)
+        .bearer_auth(api_key)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    println!("{:#?}", resp);
     Ok(())
 }
 
