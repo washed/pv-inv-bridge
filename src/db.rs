@@ -43,7 +43,7 @@ impl DBInserter {
             radiator_temperature := <int16>{},
             battery_temperature := <int16>{}
         }}",
-        data.timestamp.0.to_rfc3339(), data.device_id, data.grid_voltage, data.grid_current,
+        data.timestamp.to_rfc3339(), data.device_id, data.grid_voltage, data.grid_current,
         data.grid_power, data.grid_frequency, data.pv_power_1, data.pv_power_2,
         data.feedin_power, data.battery_charge_power, data.battery_soc,
         data.radiator_temperature, data.battery_temperature);

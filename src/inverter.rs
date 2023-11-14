@@ -4,24 +4,9 @@ use std::env;
 use std::net::SocketAddr;
 use tokio_modbus::prelude::*;
 
-#[derive(Debug, Clone)]
-pub struct DateTimeSerializable(pub DateTime<Utc>);
-
-impl Serialize for DateTimeSerializable {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.0.to_rfc3339().as_str())
-    }
-}
-
-impl From<DateTime<Utc>> for DateTimeSerializable {
-    fn from(val: DateTime<Utc>) -> DateTimeSerializable {
-        DateTimeSerializable { 0: val }
-    }
-}
-
 #[derive(Clone, Serialize, Debug)]
 pub struct PVInverterData {
-    pub timestamp: DateTimeSerializable,
+    pub timestamp: DateTime<Utc>,
     pub device_id: String,
     pub grid_voltage: f32,
     pub grid_current: f32,

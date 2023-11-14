@@ -11,9 +11,11 @@ tokio-modbus = { version = "0.9.0", default-features = false, features = ["tcp"]
 edgedb-tokio = "0.5.0"
 edgedb-protocol = "0.6.0"
 edgedb-derive = "0.5.1"
-chrono = "0.4.31"
+chrono = { version = "0.4.31", features = ["serde"] }
 axum = { version = "0.6.20", features = ["headers", "macros"] }
 futures = "0.3"
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 serde = "1.0.188"
 serde_json = "1.0.107"
+reqwest = { version = "0.11", features = ["json"] }
+iso8601-duration = "0.2.0"
