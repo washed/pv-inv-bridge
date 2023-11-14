@@ -109,15 +109,13 @@ fn start_insert_inverter_task(
             }
         };
 
-        {
-            loop {
-                match modbus_broadcast_rx.recv().await {
-                    Ok(data) => match db_inserter.insert_pv_inverter_data(data).await {
-                        Ok(res) => println!("Inserted object {res}"),
-                        Err(e) => eprintln!("Error inserting object into db: {e}"),
-                    },
-                    Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
-                }
+        loop {
+            match modbus_broadcast_rx.recv().await {
+                Ok(data) => match db_inserter.insert_pv_inverter_data(data).await {
+                    Ok(res) => println!("Inserted object {res}"),
+                    Err(e) => eprintln!("Error inserting object into db: {e}"),
+                },
+                Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
             }
         }
     });
