@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-modbus = { version = "0.9.0", default-features = false, features = ["tcp"] }
+tokio-retry = "0.3"
 edgedb-tokio = "0.5.0"
 edgedb-protocol = "0.6.0"
 edgedb-derive = "0.5.1"

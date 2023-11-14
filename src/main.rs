@@ -101,7 +101,7 @@ fn start_insert_inverter_task(
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        let db_inserter = match DBInserter::new().await {
+        let db_inserter = match DBInserter::new_retrying().await {
             Ok(db_inserter) => db_inserter,
             Err(e) => {
                 eprintln!("Error connecting to database: {e}");

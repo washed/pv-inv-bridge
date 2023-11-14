@@ -1,6 +1,9 @@
 use edgedb_derive::Queryable;
 use edgedb_protocol::model::Uuid;
 use std::env;
+use std::time::Duration;
+use tokio_retry::strategy::ExponentialBackoff;
+use tokio_retry::Retry;
 
 use crate::inverter::PVInverterData;
 
@@ -22,6 +25,13 @@ impl DBInserter {
         let db_conn = edgedb_tokio::Client::new(&config);
         db_conn.ensure_connected().await?;
         Ok(Self { db_conn })
+    }
+
+    pub async fn new_retrying() -> Result<Self, Box<dyn std::error::Error>> {
+        let retry_strategy =
+            ExponentialBackoff::from_millis(100).max_delay(Duration::from_secs(10));
+
+        Ok(Retry::spawn(retry_strategy, Self::new).await?)
     }
 
     pub async fn insert_pv_inverter_data(
