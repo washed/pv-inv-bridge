@@ -22,7 +22,6 @@ pub struct PVInverterData {
 }
 
 pub struct PVInverter {
-    modbus_tcp_address: SocketAddr,
     modbus_ctx: client::Context,
 }
 
@@ -31,10 +30,7 @@ impl PVInverter {
         let modbus_tcp_address: SocketAddr = env::var("PV_INV_MODBUS_TCP_ADDRESS")?.parse()?;
         let modbus_ctx: client::Context = tcp::connect_slave(modbus_tcp_address, Slave(1)).await?;
 
-        Ok(Self {
-            modbus_tcp_address,
-            modbus_ctx,
-        })
+        Ok(Self { modbus_ctx })
     }
 
     pub async fn get_inverter_data(self: &mut Self) -> Result<PVInverterData, std::io::Error> {
