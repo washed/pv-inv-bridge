@@ -1,7 +1,7 @@
 FROM --platform=$TARGETPLATFORM rust:1-alpine AS builder
 RUN echo $TARGETPLATFORM
 
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev pkgconfig libressl-dev
 
 # dummy project to cache deps
 WORKDIR /usr/src
