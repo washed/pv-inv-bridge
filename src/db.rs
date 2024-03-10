@@ -31,11 +31,11 @@ impl DBInserter {
         let retry_strategy =
             ExponentialBackoff::from_millis(100).max_delay(Duration::from_secs(10));
 
-        Ok(Retry::spawn(retry_strategy, Self::new).await?)
+        Retry::spawn(retry_strategy, Self::new).await
     }
 
     pub async fn insert_pv_inverter_data(
-        self: &Self,
+        &self,
         data: PVInverterData,
     ) -> Result<i32, Box<dyn std::error::Error>> {
         let query = format!("INSERT PVInverter {{

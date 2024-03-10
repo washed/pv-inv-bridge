@@ -6,7 +6,7 @@ use axum::{
     routing::get,
     Router, TypedHeader,
 };
-use chrono::{DateTime, Utc};
+
 use futures::stream::Stream;
 use std::env;
 use std::{convert::Infallible, time::Duration};
@@ -84,7 +84,7 @@ async fn sse_handler(
             res.battery_charge_power = (battery_charge_power_sum / x.len() as f64).round() as i16;
             res
         })
-        .filter_map(|x| match { Event::default().json_data(x) } {
+        .filter_map(|x| match Event::default().json_data(x) {
             Ok(foo) => Some(foo),
             Err(_) => None,
         })
