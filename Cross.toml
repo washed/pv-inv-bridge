@@ -1,0 +1,7 @@
+[target.x86_64-unknown-linux-gnu.dockerfile]
+image = "rust:1-alpine"
+file = "Dockerfile.cross"
+
+[target.aarch64-unknown-linux-gnu.dockerfile]
+image = "rust:1-alpine"
+file = "Dockerfile.cross"
