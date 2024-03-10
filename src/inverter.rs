@@ -169,8 +169,8 @@ impl PVInverter {
         let mut chars = String::new();
 
         for word in data {
-            chars.push(char::try_from((word >> 8) as u8).expect("boing"));
-            chars.push(char::try_from((word & 0x00FF) as u8).expect("boing"));
+            chars.push(char::from((word >> 8) as u8));
+            chars.push(char::from((word & 0x00FF) as u8));
         }
 
         chars
