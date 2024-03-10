@@ -33,9 +33,9 @@ impl PVInverter {
         Ok(Self { modbus_ctx })
     }
 
-    pub async fn get_inverter_data(self: &mut Self) -> Result<PVInverterData, std::io::Error> {
+    pub async fn get_inverter_data(&mut self) -> Result<PVInverterData, std::io::Error> {
         Ok(PVInverterData {
-            timestamp: Utc::now().into(),
+            timestamp: Utc::now(),
             device_id: self.get_serial_number().await?,
             grid_voltage: self.get_grid_voltage().await?,
             grid_current: self.get_grid_current().await?,

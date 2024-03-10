@@ -32,17 +32,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (modbus_broadcast_tx, _modbus_broadcast_rx) = broadcast::channel::<PVInverterData>(16);
 
     let state = AppState {
-        modbus_broadcast_tx: modbus_broadcast_tx,
+        modbus_broadcast_tx,
     };
 
     let mut join_set = JoinSet::new();
 
-    start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
+    // start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
+    start_get_pv_surplus_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
 
     start_server(state).await?;
 
-    while let Some(res) = join_set.join_next().await {
+    while let Some(_res) = join_set.join_next().await {
         println!("Task finished unexpectedly!");
     }
 
@@ -165,6 +166,22 @@ fn start_get_inverter_task(
             match modbus_broadcast_tx.send(data) {
                 Ok(_res) => println!("sent modbus data into stream"),
                 Err(e) => eprintln!("error sending data into stream: {e}"),
+            }
+        }
+    });
+}
+
+fn start_get_pv_surplus_task(
+    join_set: &mut JoinSet<()>,
+    mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
+) {
+    join_set.spawn(async move {
+        loop {
+            match modbus_broadcast_rx.recv().await {
+                Ok(data) => {
+                    println!("feed-in: {}", data.feedin_power);
+                }
+                Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
             }
         }
     });
