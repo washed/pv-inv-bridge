@@ -22,6 +22,9 @@ use inverter::{PVInverter, PVInverterData};
 mod db;
 use db::DBInserter;
 
+mod heatpump;
+use heatpump::Heatpump;
+
 #[derive(Clone)]
 pub struct AppState {
     pub modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
@@ -37,8 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut join_set = JoinSet::new();
 
-    // start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
-    start_get_pv_surplus_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
+    start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
+    start_send_pv_data_heatpump_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
 
     start_server(state).await?;
@@ -127,6 +130,7 @@ fn start_get_inverter_task(
     modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
 ) {
     join_set.spawn(async move {
+        println!("start_get_inverter_task");
         let mut pv_inverter = match PVInverter::new().await {
             Ok(pv_inverter) => pv_inverter,
             Err(e) => {
@@ -171,15 +175,29 @@ fn start_get_inverter_task(
     });
 }
 
-fn start_get_pv_surplus_task(
+fn start_send_pv_data_heatpump_task(
     join_set: &mut JoinSet<()>,
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
+        println!("start_get_pv_surplus_task");
+        let mut heatpump = match Heatpump::new().await {
+            Ok(heatpump) => heatpump,
+            Err(e) => {
+                eprintln!("Error instantiating Heatpump! {e}");
+                return;
+            }
+        };
+
         loop {
             match modbus_broadcast_rx.recv().await {
                 Ok(data) => {
-                    println!("feed-in: {}", data.feedin_power);
+                    let pv_power: f32 =
+                        ((data.pv_power_1 + data.pv_power_2) as f64 / 1000.0) as f32;
+                    let pv_surplus = (data.feedin_power as f32).clamp(0.0, f32::MAX) / 1000.0;
+
+                    heatpump.set_pv_surplus(pv_surplus).await.unwrap();
+                    heatpump.set_pv_power(pv_power).await.unwrap();
                 }
                 Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
             }
