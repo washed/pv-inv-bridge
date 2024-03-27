@@ -195,14 +195,18 @@ fn start_send_pv_data_heatpump_task(
                     let pv_power: f32 =
                         ((data.pv_power_1 + data.pv_power_2) as f64 / 1000.0) as f32;
                     let pv_surplus = (data.feedin_power as f32).clamp(0.0, f32::MAX) / 1000.0;
-                    let batter_charge_power = (data.battery_charge_power as f32 / 1000.0).abs();
-                    let pv_surplus_incl_battery = pv_surplus + batter_charge_power;
+                    let battery_charge_power =
+                        (data.battery_charge_power as f32 / 1000.0).clamp(0.0, f32::MAX);
+                    let pv_surplus_incl_battery = pv_surplus + battery_charge_power;
                     //dbg!(pv_power);
                     //dbg!(pv_surplus);
                     //dbg!(batter_charge_power);
                     //dbg!(pv_surplus_incl_battery);
 
-                    heatpump.set_pv_surplus(pv_surplus_incl_battery).await.unwrap();
+                    heatpump
+                        .set_pv_surplus(pv_surplus_incl_battery)
+                        .await
+                        .unwrap();
                     heatpump.set_pv_power(pv_power).await.unwrap();
                 }
                 Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
