@@ -201,7 +201,7 @@ fn start_send_pv_data_heatpump_task(
                     //dbg!(pv_power);
                     //dbg!(pv_surplus);
                     //dbg!(batter_charge_power);
-                    //dbg!(pv_surplus_incl_battery);
+                    dbg!(pv_surplus_incl_battery);
 
                     heatpump
                         .set_pv_surplus(pv_surplus_incl_battery)
