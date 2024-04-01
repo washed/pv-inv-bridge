@@ -1,6 +1,12 @@
 .PHONY: build
 
-build:
+build-x86_64:
+	cross build --target x86_64-unknown-linux-gnu --release
+
+build-arm64:
+	cross build --target aarch64-unknown-linux-gnu --release
+
+build: build-x86_64 build-arm64
 	-docker buildx create --use --platform linux/amd64,linux/arm64
 	docker buildx build --platform linux/amd64,linux/arm64 -t pv-inv-bridge:latest .
 	docker buildx build -t pv-inv-bridge:latest --load --progress plain .

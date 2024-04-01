@@ -1,7 +1,13 @@
-[target.x86_64-unknown-linux-gnu.dockerfile]
-image = "rust:1-alpine"
-file = "Dockerfile.cross"
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get -y install libc6-dev:$CROSS_DEB_ARCH libssl-dev:$CROSS_DEB_ARCH"
 
-[target.aarch64-unknown-linux-gnu.dockerfile]
-image = "rust:1-alpine"
-file = "Dockerfile.cross"
+]
+
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get -y install libc6-dev:$CROSS_DEB_ARCH libssl-dev:$CROSS_DEB_ARCH"
+
+]
