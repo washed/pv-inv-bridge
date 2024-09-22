@@ -1,14 +1,10 @@
-use chrono::prelude::*;
-use futures::TryFutureExt;
-use serde::Serialize;
-use std::env;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_modbus::{prelude::*, Address, Error as ModbusError, Quantity, Result as ModbusResult};
-use tokio_retry::strategy::ExponentialBackoff;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
 pub(crate) type Coil = bool;
@@ -55,16 +51,28 @@ impl RobustContext {
         }
     }
 
-    async fn refresh_context(&mut self) {
-        println!("refresh context 1");
-        let mut ctx_guard = self.ctx2.lock().await;
-        println!("refresh context 2");
-        *ctx_guard = tcp::connect_slave(self.addr, Slave(1)).await;
-        while let Err(e) = ctx_guard.as_ref() {
-            println!("trying to connect modbus: {:?}", ctx_guard);
-            *ctx_guard = tcp::connect_slave(self.addr, Slave(1)).await;
-            tokio::time::sleep(Duration::from_secs(1)).await;
+    async fn set_context(
+        ctx: Arc<Mutex<std::io::Result<client::Context>>>,
+        addr: SocketAddr,
+    ) -> Result<(), ()> {
+        let mut ctx_guard = ctx.lock().await;
+        println!("trying to connect modbus: {:?}", ctx_guard);
+        *ctx_guard = tcp::connect_slave(addr, Slave(1)).await;
+
+        match *ctx_guard {
+            Err(_) => Err(()),
+            Ok(_) => Ok(()),
         }
+    }
+
+    async fn refresh_context(&mut self) {
+        let action = || RobustContext::set_context(self.ctx2.clone(), self.addr);
+
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(5))
+            .map(jitter); //.take(10);
+
+        let result = Retry::spawn(retry_strategy, action).await.unwrap();
     }
 
     fn is_any_err<T>(res: &ModbusResult<T>) -> bool {
@@ -207,24 +215,8 @@ impl Reader for RobustContext {
             let mut res = RobustContext::try_read(&mut self.ctx2, addr, cnt).await;
 
             while RobustContext::is_any_err(&res) {
-                println!("loopy loop: {:?}", res);
-                match &res {
-                    Err(e) => {
-                        println!("here 1");
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        self.refresh_context().await;
-                        res = RobustContext::try_read(&mut self.ctx2, addr, cnt).await;
-                    }
-
-                    Ok(Err(e)) => {
-                        println!("here 2");
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        self.refresh_context().await;
-                        res = RobustContext::try_read(&mut self.ctx2, addr, cnt).await;
-                    }
-
-                    Ok(Ok(_)) => println!("yay"),
-                };
+                self.refresh_context().await;
+                res = RobustContext::try_read(&mut self.ctx2, addr, cnt).await
             }
 
             res
