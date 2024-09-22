@@ -1,8 +1,27 @@
 services:
-  pv-inv-bridge:
-    image: ghcr.io/washed/pv-inv-bridge:latest
-    build: .
-    environment:
-      EDGEDB_DSN:
-      PV_INV_MODBUS_TCP_ADDRESS:
-      INTERVAL_S: 1
+  # pv-inv-bridge:
+  #   image: ghcr.io/washed/pv-inv-bridge:latest
+  #   build: .
+  #   environment:
+  #     EDGEDB_DSN:
+  #     PV_INV_MODBUS_TCP_ADDRESS:
+  #     HEATPUMP_MODBUS_TCP_ADDRESS:
+  #     BIND_ADDRESS:
+  #     INTERVAL_S: 1
+  #   depends_on:
+  #     inverter-mock:
+  #       condition: service_started
+  #     heatpump-mock:
+  #       condition: service_started
+
+  inverter-mock:
+    image: oitc/modbus-server:latest
+    hostname: inverter_mock
+    ports:
+      - 5021:5020
+
+  heatpump-mock:
+    image: oitc/modbus-server:latest
+    hostname: heatpump_mock
+    ports:
+      - 5022:5020

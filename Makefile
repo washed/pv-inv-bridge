@@ -14,3 +14,7 @@ build: build-x86_64 build-arm64
 debug-build:
 	-docker buildx create --use --name larger_log_2 --platform linux/arm64 --driver-opt env.BUILDKIT_STEP_LOG_MAX_SIZE=50000000
 	docker buildx build --platform linux/arm64 -t pv-inv-bridge:latest --load --progress plain .
+
+up:
+#	cargo build --release
+	docker compose up --build

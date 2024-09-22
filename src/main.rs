@@ -10,11 +10,14 @@ use axum::{
 use futures::stream::Stream;
 use std::env;
 use std::{convert::Infallible, time::Duration};
+use tokio::signal::unix::{signal, Signal, SignalKind};
 use tokio::sync::broadcast;
 use tokio::task::JoinSet;
-use tokio::time;
+use tokio::{select, time};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
+
+mod robust_modbus;
 
 mod inverter;
 use inverter::{PVInverter, PVInverterData};
@@ -40,8 +43,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut join_set = JoinSet::new();
 
-    start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
-    start_send_pv_data_heatpump_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
+    join_set.spawn(async {
+        let mut sigpipe = signal(SignalKind::pipe()).unwrap();
+        loop {
+            select! {
+                sig = sigpipe.recv() => {
+                    println!("received sigpipe: {:?}", sig);
+                }
+            }
+        }
+    });
+
+    // start_insert_inverter_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
+    // start_send_pv_data_heatpump_task(&mut join_set, state.modbus_broadcast_tx.subscribe());
     start_get_inverter_task(&mut join_set, state.modbus_broadcast_tx.clone());
 
     start_server(state).await?;
@@ -156,10 +170,9 @@ fn start_get_inverter_task(
 
         loop {
             interval.tick().await;
-            let data: PVInverterData = match pv_inverter.get_inverter_data().await {
+            match pv_inverter.get_inverter_data().await {
                 Ok(data) => {
                     println!("modbus rx");
-                    data
                 }
                 Err(e) => {
                     eprintln!("Error getting modbus data: {e}");
@@ -167,10 +180,12 @@ fn start_get_inverter_task(
                 }
             };
 
+            /*
             match modbus_broadcast_tx.send(data) {
                 Ok(_res) => println!("sent modbus data into stream"),
                 Err(e) => eprintln!("error sending data into stream: {e}"),
             }
+            */
         }
     });
 }

@@ -1,0 +1,25 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Cargo launch",
+            "cargo": {
+                "args": [
+                    "build",
+                ]
+            },
+            "args": [],
+            "env": {
+                "INTERVAL_S": "2",
+                "PV_INV_MODBUS_TCP_ADDRESS": "localhost:5021",
+                "HEATPUMP_MODBUS_TCP_ADDRESS": "localhost:5022",
+                "BIND_ADDRESS": "0.0.0.0:3001"
+            }
+        },
+    ]
+}

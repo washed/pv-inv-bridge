@@ -3,11 +3,11 @@ name = "pv-inv-bridge"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-tokio-modbus = { version = "0.9.0", default-features = false, features = ["tcp"] }
+tokio-modbus = { version = "0.14.0", default-features = false, features = [
+    "tcp",
+] }
 tokio-retry = "0.3"
 edgedb-tokio = "0.5.0"
 edgedb-protocol = "0.6.0"
@@ -20,3 +20,4 @@ serde = "1.0.188"
 serde_json = "1.0.107"
 reqwest = { version = "0.11", features = ["json"] }
 iso8601-duration = "0.2.0"
+anyhow = "1.0.89"
