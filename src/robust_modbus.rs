@@ -2,7 +2,6 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
 use tokio_modbus::{prelude::*, Address, Error as ModbusError, Quantity, Result as ModbusResult};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
@@ -35,7 +34,7 @@ impl RobustContext {
     }
 
     async fn try_read(
-        ctx: &mut Arc<Mutex<std::io::Result<client::Context>>>,
+        ctx: Arc<Mutex<std::io::Result<client::Context>>>,
         addr: Address,
         cnt: Quantity,
     ) -> ModbusResult<Vec<Word>> {
@@ -65,8 +64,8 @@ impl RobustContext {
         }
     }
 
-    async fn refresh_context(&mut self) {
-        let action = || RobustContext::set_context(self.ctx2.clone(), self.addr);
+    async fn refresh_context(ctx: Arc<Mutex<std::io::Result<client::Context>>>, addr: SocketAddr) {
+        let action = || RobustContext::set_context(ctx.clone(), addr);
 
         let retry_strategy = ExponentialBackoff::from_millis(10)
             .max_delay(Duration::from_secs(5))
@@ -212,14 +211,21 @@ impl Reader for RobustContext {
         Self: 'async_trait,
     {
         Box::pin(async move {
-            let mut res = RobustContext::try_read(&mut self.ctx2, addr, cnt).await;
+            let action = || async {
+                println!("trying to read register");
+                let res = RobustContext::try_read(self.ctx2.clone(), addr, cnt).await;
+                if res.is_err() {
+                    RobustContext::refresh_context(self.ctx2.clone(), self.addr).await;
+                }
+                res
+            };
 
-            while RobustContext::is_any_err(&res) {
-                self.refresh_context().await;
-                res = RobustContext::try_read(&mut self.ctx2, addr, cnt).await
-            }
+            let retry_strategy = ExponentialBackoff::from_millis(10)
+                .max_delay(Duration::from_secs(1))
+                .map(jitter)
+                .take(10);
 
-            res
+            Retry::spawn(retry_strategy, action).await
         })
     }
 
