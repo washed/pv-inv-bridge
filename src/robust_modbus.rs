@@ -68,6 +68,94 @@ impl RobustContext {
             Err(_) => println!("could not reconnect modbus"),
         };
     }
+
+    async fn try_read<'a>(
+        &self,
+        ctx: Arc<Mutex<std::io::Result<client::Context>>>,
+        reader_action: ModbusReaderAction<'a>,
+    ) -> ModbusReaderResult {
+        let res = {
+            let mut ctx_guard = ctx.lock().await;
+            // TODO: not sure if this error mapping is the most elegant way to get out of this
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()));
+
+            match reader_action {
+                ModbusReaderAction::InputRegisters { addr, cnt } => {
+                    if let Err(e) = ctx {
+                        return ModbusReaderResult::InputRegisters(Err(ModbusError::Transport(e)));
+                    } else {
+                        ModbusReaderResult::InputRegisters(
+                            ctx.unwrap().read_input_registers(addr, cnt).await,
+                        )
+                    }
+                }
+                ModbusReaderAction::Coils { addr, cnt } => {
+                    ModbusReaderResult::Coils(ctx.read_coils(addr, cnt).await)
+                }
+                ModbusReaderAction::DiscreteInputs { addr, cnt } => todo!(),
+                ModbusReaderAction::HoldingRegisters { addr, cnt } => todo!(),
+                ModbusReaderAction::ReadWriteMultipleRegisters {
+                    read_addr,
+                    read_count,
+                    write_addr,
+                    write_data,
+                } => todo!(),
+            }
+        };
+
+        if res.is_err() {
+            RobustContext::refresh_context(ctx.clone(), self.addr, self.slave).await;
+        }
+
+        res
+    }
+}
+
+enum ModbusReaderAction<'a> {
+    Coils {
+        addr: Address,
+        cnt: Quantity,
+    }, // Result<Vec<Coil>>;
+    DiscreteInputs {
+        addr: Address,
+        cnt: Quantity,
+    }, // Result<Vec<Coil>>;
+    HoldingRegisters {
+        addr: Address,
+        cnt: Quantity,
+    }, // Result<Vec<Word>>;
+    InputRegisters {
+        addr: Address,
+        cnt: Quantity,
+    }, // Result<Vec<Word>>;
+    ReadWriteMultipleRegisters {
+        read_addr: Address,
+        read_count: Quantity,
+        write_addr: Address,
+        write_data: &'a [Word],
+    }, // Result<Vec<Word>
+}
+
+enum ModbusReaderResult {
+    Coils(ModbusResult<Vec<Coil>>),
+    DiscreteInputs(ModbusResult<Vec<Coil>>),
+    HoldingRegisters(ModbusResult<Vec<Word>>),
+    InputRegisters(ModbusResult<Vec<Word>>),
+    ReadWriteMultipleRegisters(ModbusResult<Vec<Word>>),
+}
+
+impl ModbusReaderResult {
+    fn is_err(&self) -> bool {
+        match self {
+            ModbusReaderResult::Coils(vec) => vec.is_err(),
+            ModbusReaderResult::DiscreteInputs(vec) => vec.is_err(),
+            ModbusReaderResult::HoldingRegisters(vec) => vec.is_err(),
+            ModbusReaderResult::InputRegisters(vec) => vec.is_err(),
+            ModbusReaderResult::ReadWriteMultipleRegisters(vec) => vec.is_err(),
+        }
+    }
 }
 
 impl SlaveContext for RobustContext {
@@ -225,26 +313,7 @@ impl Reader for RobustContext {
         Self: 'async_trait,
     {
         Box::pin(async move {
-            let action = || async {
-                let res = {
-                    async {
-                        let mut ctx_guard = self.ctx.lock().await;
-                        // TODO: not sure if this error mapping is the most elegant way to get out of this
-                        let ctx = ctx_guard
-                            .as_mut()
-                            .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
-
-                        ctx.read_input_registers(addr, cnt).await
-                    }
-                }
-                .await;
-
-                if res.is_err() {
-                    RobustContext::refresh_context(self.ctx.clone(), self.addr, self.slave).await;
-                }
-
-                res
-            };
+            let action = || async { self.foo(self.ctx.clone(), addr, cnt).await };
 
             let retry_strategy = FixedInterval::from_millis(10).map(jitter).take(3);
 
