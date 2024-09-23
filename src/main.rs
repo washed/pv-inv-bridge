@@ -176,7 +176,6 @@ fn start_get_inverter_task(
                 }
                 Err(e) => {
                     eprintln!("Error getting modbus data: {e}");
-                    return;
                 }
             };
 

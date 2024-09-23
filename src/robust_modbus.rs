@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_modbus::{prelude::*, Address, Error as ModbusError, Quantity, Result as ModbusResult};
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{jitter, FixedInterval};
 use tokio_retry::Retry;
 
 pub(crate) type Coil = bool;
@@ -66,16 +66,11 @@ impl RobustContext {
 
     async fn refresh_context(ctx: Arc<Mutex<std::io::Result<client::Context>>>, addr: SocketAddr) {
         let action = || RobustContext::set_context(ctx.clone(), addr);
-
-        let retry_strategy = ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(5))
-            .map(jitter); //.take(10);
-
-        let result = Retry::spawn(retry_strategy, action).await.unwrap();
-    }
-
-    fn is_any_err<T>(res: &ModbusResult<T>) -> bool {
-        !matches!(res, Ok(Ok(_)))
+        let retry_strategy = FixedInterval::from_millis(10).map(jitter).take(3);
+        match Retry::spawn(retry_strategy, action).await {
+            Ok(_) => println!("successfully reconnect modbus"),
+            Err(_) => println!("could not reconnect modbus, better luck next time"),
+        };
     }
 }
 
@@ -212,18 +207,27 @@ impl Reader for RobustContext {
     {
         Box::pin(async move {
             let action = || async {
-                println!("trying to read register");
-                let res = RobustContext::try_read(self.ctx2.clone(), addr, cnt).await;
+                let res = {
+                    async {
+                        let mut ctx_guard = self.ctx2.lock().await;
+                        // TODO: not sure if this error mapping is the most elegant way to get out of this
+                        let ctx = ctx_guard
+                            .as_mut()
+                            .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+
+                        ctx.read_input_registers(addr, cnt).await
+                    }
+                }
+                .await;
+
                 if res.is_err() {
                     RobustContext::refresh_context(self.ctx2.clone(), self.addr).await;
                 }
+
                 res
             };
 
-            let retry_strategy = ExponentialBackoff::from_millis(10)
-                .max_delay(Duration::from_secs(1))
-                .map(jitter)
-                .take(10);
+            let retry_strategy = FixedInterval::from_millis(10).map(jitter).take(3);
 
             Retry::spawn(retry_strategy, action).await
         })
