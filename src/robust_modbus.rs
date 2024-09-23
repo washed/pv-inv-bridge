@@ -2,7 +2,9 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tokio_modbus::{prelude::*, Address, Error as ModbusError, Quantity, Result as ModbusResult};
+use tokio_modbus::{
+    prelude::*, slave, Address, Error as ModbusError, Quantity, Result as ModbusResult,
+};
 use tokio_retry::strategy::{jitter, FixedInterval};
 use tokio_retry::Retry;
 
@@ -12,11 +14,12 @@ pub(crate) type Word = u16;
 #[derive(Debug)]
 pub struct RobustContext {
     addr: SocketAddr,
+    slave: u8,
     ctx: Arc<Mutex<std::io::Result<client::Context>>>,
 }
 
 impl RobustContext {
-    pub async fn new(addr: SocketAddr) -> RobustContext {
+    pub async fn new(addr: SocketAddr, slave: u8) -> RobustContext {
         let ctx2: std::io::Result<client::Context> = Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "not yet connected",
@@ -24,6 +27,7 @@ impl RobustContext {
 
         Self {
             addr,
+            slave,
             ctx: Arc::new(Mutex::new(ctx2)),
         }
     }
@@ -40,10 +44,11 @@ impl RobustContext {
     async fn set_context(
         ctx: Arc<Mutex<std::io::Result<client::Context>>>,
         addr: SocketAddr,
+        slave: u8,
     ) -> Result<(), ()> {
         let mut ctx_guard = ctx.lock().await;
         println!("trying to connect modbus: {:?}", ctx_guard);
-        *ctx_guard = tcp::connect_slave(addr, Slave(1)).await;
+        *ctx_guard = tcp::connect_slave(addr, Slave(slave)).await;
 
         match *ctx_guard {
             Err(_) => Err(()),
@@ -51,8 +56,12 @@ impl RobustContext {
         }
     }
 
-    async fn refresh_context(ctx: Arc<Mutex<std::io::Result<client::Context>>>, addr: SocketAddr) {
-        let action = || RobustContext::set_context(ctx.clone(), addr);
+    async fn refresh_context(
+        ctx: Arc<Mutex<std::io::Result<client::Context>>>,
+        addr: SocketAddr,
+        slave: u8,
+    ) {
+        let action = || RobustContext::set_context(ctx.clone(), addr, slave);
         let retry_strategy = FixedInterval::from_millis(10).map(jitter).take(3);
         match Retry::spawn(retry_strategy, action).await {
             Ok(_) => println!("successfully reconnected modbus"),
@@ -231,7 +240,7 @@ impl Reader for RobustContext {
                 .await;
 
                 if res.is_err() {
-                    RobustContext::refresh_context(self.ctx.clone(), self.addr).await;
+                    RobustContext::refresh_context(self.ctx.clone(), self.addr, self.slave).await;
                 }
 
                 res

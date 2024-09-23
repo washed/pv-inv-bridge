@@ -35,12 +35,7 @@ impl PVInverter {
             .unwrap()
             .collect();
 
-        /*
-        let client: client::Context =
-        tcp::connect_slave(modbus_tcp_address[0], Slave(1)).await??;
-        */
-
-        let modbus_ctx: RobustContext = RobustContext::new(modbus_tcp_address[0]).await;
+        let modbus_ctx: RobustContext = RobustContext::new(modbus_tcp_address[0], 1).await;
         Ok(Self { modbus_ctx })
     }
 
