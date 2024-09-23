@@ -69,31 +69,36 @@ impl RobustContext {
         };
     }
 
-    async fn try_read<'a>(
+    /*
+
+    async fn try_read<'a, RA>(
         &self,
         ctx: Arc<Mutex<std::io::Result<client::Context>>>,
-        reader_action: ModbusReaderAction<'a>,
-    ) -> ModbusReaderResult {
+        reader_action: RA,
+    ) -> RA::Result
+    where
+        RA: ModbusReaderAction,
+    {
         let res = {
             let mut ctx_guard = ctx.lock().await;
             // TODO: not sure if this error mapping is the most elegant way to get out of this
             let ctx = ctx_guard
                 .as_mut()
-                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()));
+                .map_err(|e| ModbusError::Transport(std::io::Error::new(e.kind(), e.to_string())));
+
+            if RA::Request
 
             match reader_action {
                 ModbusReaderAction::InputRegisters { addr, cnt } => {
-                    if let Err(e) = ctx {
-                        return ModbusReaderResult::InputRegisters(Err(ModbusError::Transport(e)));
-                    } else {
-                        ModbusReaderResult::InputRegisters(
-                            ctx.unwrap().read_input_registers(addr, cnt).await,
-                        )
-                    }
+                    ModbusReaderResult::InputRegisters(match ctx {
+                        Ok(ctx) => ctx.read_input_registers(addr, cnt).await,
+                        Err(e) => Err(e),
+                    })
                 }
-                ModbusReaderAction::Coils { addr, cnt } => {
-                    ModbusReaderResult::Coils(ctx.read_coils(addr, cnt).await)
-                }
+                ModbusReaderAction::Coils { addr, cnt } => ModbusReaderResult::Coils(match ctx {
+                    Ok(ctx) => ctx.read_coils(addr, cnt).await,
+                    Err(e) => Err(e),
+                }),
                 ModbusReaderAction::DiscreteInputs { addr, cnt } => todo!(),
                 ModbusReaderAction::HoldingRegisters { addr, cnt } => todo!(),
                 ModbusReaderAction::ReadWriteMultipleRegisters {
@@ -110,34 +115,122 @@ impl RobustContext {
         }
 
         res
+    }     */
+}
+
+pub trait TryRead: ModbusReaderAction {
+    async fn try_read(
+        self,
+        robust_ctx: &RobustContext,
+        // ctx: Arc<Mutex<std::io::Result<client::Context>>>,
+    ) -> ModbusResult<Vec<Self::Result>>;
+}
+
+trait ModbusReaderAction {
+    type Request;
+    type Result;
+}
+
+pub struct Coils {
+    addr: Address,
+    cnt: Quantity,
+}
+
+impl ModbusReaderAction for Coils {
+    type Request = Self;
+    type Result = Coil;
+}
+
+/*
+
+impl TryRead for Coils {
+    async fn try_read(
+        self,
+        robust_ctx: &RobustContext,
+        // ctx: Arc<Mutex<std::io::Result<client::Context>>>,
+    ) -> ModbusResult<Vec<Self::Result>> {
+        let res = {
+            let mut ctx_guard = ctx.lock().await;
+            // TODO: not sure if this error mapping is the most elegant way to get out of this
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| ModbusError::Transport(std::io::Error::new(e.kind(), e.to_string())));
+
+            match ctx {
+                Ok(ctx) => ctx.read_coils(self.addr, self.cnt).await,
+                Err(e) => Err(e),
+            }
+        };
+
+        if res.is_err() {
+            RobustContext::refresh_context(ctx.clone(), robust_ctx.addr, robust_ctx.slave).await;
+        }
+
+        res
+    }
+} */
+
+pub struct DiscreteInputs {
+    addr: Address,
+    cnt: Quantity,
+}
+
+impl ModbusReaderAction for DiscreteInputs {
+    type Request = Self;
+    type Result = Coil;
+}
+
+pub struct HoldingRegisters {
+    addr: Address,
+    cnt: Quantity,
+}
+
+pub struct InputRegisters {
+    addr: Address,
+    cnt: Quantity,
+}
+
+impl ModbusReaderAction for InputRegisters {
+    type Request = Self;
+    type Result = Word;
+}
+
+impl TryRead for InputRegisters {
+    async fn try_read(
+        self,
+        robust_ctx: &RobustContext,
+        // ctx: Arc<Mutex<std::io::Result<client::Context>>>,
+    ) -> ModbusResult<Vec<Self::Result>> {
+        let ctx = robust_ctx.ctx.clone();
+        let res = {
+            let mut ctx_guard = ctx.lock().await;
+            // TODO: not sure if this error mapping is the most elegant way to get out of this
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| ModbusError::Transport(std::io::Error::new(e.kind(), e.to_string())));
+
+            match ctx {
+                Ok(ctx) => ctx.read_input_registers(self.addr, self.cnt).await,
+                Err(e) => Err(e),
+            }
+        };
+
+        if res.is_err() {
+            RobustContext::refresh_context(ctx.clone(), robust_ctx.addr, robust_ctx.slave).await;
+        }
+
+        res
     }
 }
 
-enum ModbusReaderAction<'a> {
-    Coils {
-        addr: Address,
-        cnt: Quantity,
-    }, // Result<Vec<Coil>>;
-    DiscreteInputs {
-        addr: Address,
-        cnt: Quantity,
-    }, // Result<Vec<Coil>>;
-    HoldingRegisters {
-        addr: Address,
-        cnt: Quantity,
-    }, // Result<Vec<Word>>;
-    InputRegisters {
-        addr: Address,
-        cnt: Quantity,
-    }, // Result<Vec<Word>>;
-    ReadWriteMultipleRegisters {
-        read_addr: Address,
-        read_count: Quantity,
-        write_addr: Address,
-        write_data: &'a [Word],
-    }, // Result<Vec<Word>
+pub struct ReadWriteMultipleRegisters<'a> {
+    read_addr: Address,
+    read_count: Quantity,
+    write_addr: Address,
+    write_data: &'a [Word],
 }
 
+/*
 enum ModbusReaderResult {
     Coils(ModbusResult<Vec<Coil>>),
     DiscreteInputs(ModbusResult<Vec<Coil>>),
@@ -145,6 +238,7 @@ enum ModbusReaderResult {
     InputRegisters(ModbusResult<Vec<Word>>),
     ReadWriteMultipleRegisters(ModbusResult<Vec<Word>>),
 }
+
 
 impl ModbusReaderResult {
     fn is_err(&self) -> bool {
@@ -157,6 +251,7 @@ impl ModbusReaderResult {
         }
     }
 }
+*/
 
 impl SlaveContext for RobustContext {
     fn set_slave(&mut self, slave: Slave) {
@@ -313,7 +408,12 @@ impl Reader for RobustContext {
         Self: 'async_trait,
     {
         Box::pin(async move {
-            let action = || async { self.foo(self.ctx.clone(), addr, cnt).await };
+            let action = || async {
+                let ir = InputRegisters { addr, cnt };
+                let res = ir.try_read(self).await;
+
+                res
+            };
 
             let retry_strategy = FixedInterval::from_millis(10).map(jitter).take(3);
 
