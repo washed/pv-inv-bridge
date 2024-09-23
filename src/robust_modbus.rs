@@ -19,7 +19,7 @@ impl RobustContext {
     pub async fn new(addr: SocketAddr) -> RobustContext {
         let ctx2: std::io::Result<client::Context> = Err(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "not yet connect",
+            "not yet connected",
         ));
 
         Self {
@@ -35,23 +35,6 @@ impl RobustContext {
             .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
 
         ctx.disconnect().await
-    }
-
-    async fn try_read(
-        ctx: Arc<Mutex<std::io::Result<client::Context>>>,
-        addr: Address,
-        cnt: Quantity,
-    ) -> ModbusResult<Vec<Word>> {
-        let mut ctx_guard = ctx.lock().await;
-        let ctx = ctx_guard.as_mut().unwrap();
-        let res = ctx.read_input_registers(addr, cnt).await;
-        match res {
-            Ok(res) => match res {
-                Ok(res) => Ok(Ok(res)),
-                Err(e) => Ok(Err(e)),
-            },
-            Err(e) => Err(e),
-        }
     }
 
     async fn set_context(
@@ -72,8 +55,8 @@ impl RobustContext {
         let action = || RobustContext::set_context(ctx.clone(), addr);
         let retry_strategy = FixedInterval::from_millis(10).map(jitter).take(3);
         match Retry::spawn(retry_strategy, action).await {
-            Ok(_) => println!("successfully reconnect modbus"),
-            Err(_) => println!("could not reconnect modbus, better luck next time"),
+            Ok(_) => println!("successfully reconnected modbus"),
+            Err(_) => println!("could not reconnect modbus"),
         };
     }
 }
