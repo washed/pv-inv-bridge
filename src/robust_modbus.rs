@@ -12,25 +12,29 @@ pub(crate) type Word = u16;
 #[derive(Debug)]
 pub struct RobustContext {
     addr: SocketAddr,
-    ctx: client::Context,
-    ctx2: Arc<Mutex<std::io::Result<client::Context>>>,
+    ctx: Arc<Mutex<std::io::Result<client::Context>>>,
 }
 
 impl RobustContext {
     pub async fn new(addr: SocketAddr) -> RobustContext {
-        // TODO: get rid of the first context and init the second to an Err/None
-        let ctx = tcp::connect_slave(addr, Slave(1)).await.unwrap();
-        let ctx2 = tcp::connect_slave(addr, Slave(1)).await.unwrap();
+        let ctx2: std::io::Result<client::Context> = Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "not yet connect",
+        ));
 
         Self {
             addr,
-            ctx,
-            ctx2: Arc::new(Mutex::new(Ok(ctx2))),
+            ctx: Arc::new(Mutex::new(ctx2)),
         }
     }
 
     pub async fn disconnect(&mut self) -> ModbusResult<()> {
-        self.ctx.disconnect().await
+        let mut ctx_guard = self.ctx.lock().await;
+        let ctx = ctx_guard
+            .as_mut()
+            .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+
+        ctx.disconnect().await
     }
 
     async fn try_read(
@@ -76,7 +80,9 @@ impl RobustContext {
 
 impl SlaveContext for RobustContext {
     fn set_slave(&mut self, slave: Slave) {
-        self.ctx.set_slave(slave);
+        // TODO: ?!
+        // maybe some sort of channeled async slave setter thingy?
+        // self.ctx.set_slave(slave);
     }
 }
 
@@ -103,7 +109,14 @@ impl Client for RobustContext {
         'life1: 'async_trait,
         Self: 'async_trait,
     {
-        self.ctx.call(request)
+        Box::pin(async {
+            let mut ctx_guard = self.ctx.lock().await;
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+
+            ctx.call(request).await
+        })
     }
 }
 
@@ -155,7 +168,14 @@ impl Reader for RobustContext {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        self.ctx.read_discrete_inputs(addr, cnt)
+        Box::pin(async move {
+            let mut ctx_guard = self.ctx.lock().await;
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+
+            ctx.read_discrete_inputs(addr, cnt).await
+        })
     }
 
     #[doc = " Read multiple holding registers (0x03)"]
@@ -180,7 +200,14 @@ impl Reader for RobustContext {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        self.ctx.read_holding_registers(addr, cnt)
+        Box::pin(async move {
+            let mut ctx_guard = self.ctx.lock().await;
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+
+            ctx.read_holding_registers(addr, cnt).await
+        })
     }
 
     #[doc = " Read multiple input registers (0x04)"]
@@ -209,7 +236,7 @@ impl Reader for RobustContext {
             let action = || async {
                 let res = {
                     async {
-                        let mut ctx_guard = self.ctx2.lock().await;
+                        let mut ctx_guard = self.ctx.lock().await;
                         // TODO: not sure if this error mapping is the most elegant way to get out of this
                         let ctx = ctx_guard
                             .as_mut()
@@ -221,7 +248,7 @@ impl Reader for RobustContext {
                 .await;
 
                 if res.is_err() {
-                    RobustContext::refresh_context(self.ctx2.clone(), self.addr).await;
+                    RobustContext::refresh_context(self.ctx.clone(), self.addr).await;
                 }
 
                 res
@@ -261,7 +288,14 @@ impl Reader for RobustContext {
         'life1: 'async_trait,
         Self: 'async_trait,
     {
-        self.ctx
-            .read_write_multiple_registers(read_addr, read_count, write_addr, write_data)
+        Box::pin(async move {
+            let mut ctx_guard = self.ctx.lock().await;
+            let ctx = ctx_guard
+                .as_mut()
+                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+
+            ctx.read_write_multiple_registers(read_addr, read_count, write_addr, write_data)
+                .await
+        })
     }
 }

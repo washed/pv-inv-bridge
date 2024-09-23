@@ -169,6 +169,7 @@ fn start_get_inverter_task(
         let mut interval = time::interval(time::Duration::from_secs(interval));
 
         loop {
+            println!("tick");
             interval.tick().await;
             match pv_inverter.get_inverter_data().await {
                 Ok(data) => {
