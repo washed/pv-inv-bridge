@@ -3,7 +3,6 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use serde::Serialize;
 use std::env;
-use std::net::{SocketAddr, ToSocketAddrs};
 use tokio_modbus::prelude::*;
 
 #[derive(Clone, Serialize, Debug)]
@@ -24,18 +23,13 @@ pub struct PVInverterData {
 }
 
 pub struct PVInverter {
-    // client: RobustClient,
-    modbus_ctx: RobustContext, // client::Context,
+    modbus_ctx: RobustContext,
 }
 
 impl PVInverter {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let modbus_tcp_address: Vec<SocketAddr> = env::var("PV_INV_MODBUS_TCP_ADDRESS")?
-            .to_socket_addrs()
-            .unwrap()
-            .collect();
-
-        let modbus_ctx: RobustContext = RobustContext::new(modbus_tcp_address[0], 1).await;
+        let host = env::var("PV_INV_MODBUS_TCP_ADDRESS")?;
+        let modbus_ctx: RobustContext = RobustContext::new(host.as_str(), Slave(1)).await?;
         Ok(Self { modbus_ctx })
     }
 
