@@ -1,0 +1,46 @@
+version: 2.1
+jobs:
+  test:
+    docker:
+      - image: cimg/rust:1.81
+        auth:
+          username: $DOCKERHUB_USER
+          password: $DOCKERHUB_PASSWORD
+    resource_class: arm.medium
+    steps:
+      - checkout
+      - run:
+          command: cargo test
+
+  build:
+    docker:
+      - image: cimg/rust:1.81
+        auth:
+          username: $DOCKERHUB_USER
+          password: $DOCKERHUB_PASSWORD
+    resource_class: arm.medium
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: build and push docker image
+          command: |
+            cargo build --release
+            docker build -t $DOCKERHUB_USER/pv-inv-bridge:$CIRCLE_SHA1 -t $DOCKERHUB_USER/pv-inv-bridge:latest .
+
+            echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USER --password-stdin
+            docker push $DOCKERHUB_USER/pv-inv-bridge:$CIRCLE_SHA1
+            docker push $DOCKERHUB_USER/pv-inv-bridge:latest
+
+workflows:
+  build-and-test:
+    jobs:
+      - test:
+          context:
+            - docker-hub
+      - build:
+          context:
+            - docker-hub-rw
+          requires:
+            - test
