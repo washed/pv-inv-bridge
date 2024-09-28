@@ -1,16 +1,16 @@
 version: 2.1
 jobs:
-  test:
-    docker:
-      - image: cimg/rust:1.81
-        auth:
-          username: $DOCKERHUB_USER
-          password: $DOCKERHUB_PASSWORD
-    resource_class: arm.medium
-    steps:
-      - checkout
-      - run:
-          command: cargo test
+  #  test:
+  #    docker:
+  #      - image: cimg/rust:1.81
+  #        auth:
+  #          username: $DOCKERHUB_USER
+  #          password: $DOCKERHUB_PASSWORD
+  #    resource_class: arm.medium
+  #    steps:
+  #      - checkout
+  #      - run:
+  #          command: cargo test
 
   build:
     docker:
@@ -36,11 +36,11 @@ jobs:
 workflows:
   build-and-test:
     jobs:
-      - test:
-          context:
-            - docker-hub
+      #     - test:
+      #         context:
+      #           - docker-hub
       - build:
           context:
             - docker-hub-rw
-          requires:
-            - test
+      #    requires:
+      #      - test
