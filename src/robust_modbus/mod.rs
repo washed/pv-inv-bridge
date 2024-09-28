@@ -62,6 +62,7 @@ impl RobustContext {
         FixedInterval::from_millis(10).map(jitter).take(3)
     }
 
+    #[allow(dead_code)]
     pub async fn disconnect(&mut self) -> ModbusResult<()> {
         let mut ctx_guard = self.ctx.lock().await;
         let ctx = ctx_guard
@@ -114,18 +115,14 @@ impl RobustContext {
 
 impl SlaveContext for RobustContext {
     fn set_slave(&mut self, slave: Slave) {
-        self.slave_sender.blocking_send(slave);
+        let _ = self.slave_sender.blocking_send(slave);
     }
 }
 
 impl Client for RobustContext {
     #[doc = " Invoke a _Modbus_ function"]
     #[must_use]
-    #[allow(
-        elided_named_lifetimes,
-        clippy::type_complexity,
-        clippy::type_repetition_in_bounds
-    )]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     fn call<'life0, 'life1, 'async_trait>(
         &'life0 mut self,
         request: Request<'life1>,
