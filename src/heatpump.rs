@@ -1,6 +1,7 @@
 use crate::robust_modbus::prelude::*;
 use anyhow::anyhow;
 use std::env;
+use tracing::debug;
 
 pub struct Heatpump {
     modbus_ctx: RobustContext,
@@ -20,7 +21,7 @@ impl Heatpump {
     }
 
     pub async fn set_pv_surplus(&mut self, pv_surplus_power_watts: f32) -> anyhow::Result<()> {
-        dbg!(pv_surplus_power_watts);
+        debug!(pv_surplus_power_watts);
         let data = idm_float_to_u16(pv_surplus_power_watts);
         self.modbus_ctx
             .write_multiple_registers(74, &data)
@@ -30,7 +31,7 @@ impl Heatpump {
     }
 
     pub async fn set_pv_power(&mut self, pv_power: f32) -> anyhow::Result<()> {
-        dbg!(pv_power);
+        debug!(pv_power);
         let data = idm_float_to_u16(pv_power);
         self.modbus_ctx
             .write_multiple_registers(78, &data)

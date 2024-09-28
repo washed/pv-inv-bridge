@@ -3,6 +3,7 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use serde::Serialize;
 use std::env;
+use tracing::error;
 
 #[derive(Clone, Serialize, Debug)]
 pub struct PVInverterData {
@@ -154,12 +155,12 @@ impl PVInverter {
             Ok(res) => match res {
                 Ok(res_inner) => res_inner[0],
                 Err(e) => {
-                    eprintln!("error inner: {e}");
+                    error!("error inner: {e}");
                     return Err(anyhow!("inner error"));
                 }
             },
             Err(e) => {
-                eprintln!("error outer: {e}");
+                error!("error outer: {e}");
                 return Err(anyhow!("outer error"));
             }
         };

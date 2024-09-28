@@ -23,3 +23,4 @@ iso8601-duration = "0.2.0"
 anyhow = "1.0.89"
 tracing = { version = "0.1.40", features = ["valuable"] }
 valuable = { version = "0.1.0", features = ["derive"] }
+tracing-subscriber = { version = "0.3.18", features = ["chrono", "env-filter", "tracing", "valuable"] }

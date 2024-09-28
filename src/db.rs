@@ -4,6 +4,7 @@ use std::env;
 use std::time::Duration;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
+use tracing::info;
 
 use crate::inverter::PVInverterData;
 
@@ -58,7 +59,7 @@ impl DBInserter {
         data.feedin_power, data.battery_charge_power, data.battery_soc,
         data.radiator_temperature, data.battery_temperature);
         self.db_conn.execute(&query, &()).await?;
-        println!("Inserted {:#?}", data);
+        info!("Inserted {:#?}", data);
         Ok(0)
     }
 }

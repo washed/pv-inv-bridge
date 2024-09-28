@@ -15,6 +15,7 @@ use tokio::task::JoinSet;
 use tokio::time;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
+use tracing::{debug, error, info, warn};
 
 mod robust_modbus;
 
@@ -32,8 +33,17 @@ pub struct AppState {
     pub modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
 }
 
+fn init_logging() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_env_filter("debug,tokio_modbus=info")
+        .init();
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_logging();
+
     let (modbus_broadcast_tx, _modbus_broadcast_rx) = broadcast::channel::<PVInverterData>(16);
 
     let state = AppState {
@@ -49,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_server(state).await?;
 
     while let Some(_res) = join_set.join_next().await {
-        println!("Task finished unexpectedly!");
+        warn!("Task finished unexpectedly!");
     }
 
     Ok(())
@@ -73,7 +83,7 @@ async fn sse_handler(
     State(state): State<AppState>,
     TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    println!("`{}` connected", user_agent.as_str());
+    info!("`{}` connected", user_agent.as_str());
     let modbus_broadcast_sse_rx = state.modbus_broadcast_tx.subscribe();
     let stream = BroadcastStream::new(modbus_broadcast_sse_rx)
         .chunks_timeout(1, Duration::from_secs(10))
@@ -110,7 +120,7 @@ fn start_insert_inverter_task(
         let db_inserter = match DBInserter::new_retrying().await {
             Ok(db_inserter) => db_inserter,
             Err(e) => {
-                eprintln!("Error connecting to database: {e}");
+                error!("Error connecting to database: {e}");
                 return;
             }
         };
@@ -118,10 +128,10 @@ fn start_insert_inverter_task(
         loop {
             match modbus_broadcast_rx.recv().await {
                 Ok(data) => match db_inserter.insert_pv_inverter_data(data).await {
-                    Ok(res) => println!("Inserted object {res}"),
-                    Err(e) => eprintln!("Error inserting object into db: {e}"),
+                    Ok(res) => info!("Inserted object {res}"),
+                    Err(e) => error!("Error inserting object into db: {e}"),
                 },
-                Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
+                Err(e) => error!("Error receiving modbus data from stream! {e}"),
             }
         }
     });
@@ -132,11 +142,11 @@ fn start_get_inverter_task(
     modbus_broadcast_tx: broadcast::Sender<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        println!("start_get_inverter_task");
+        info!("start_get_inverter_task");
         let mut pv_inverter = match PVInverter::new().await {
             Ok(pv_inverter) => pv_inverter,
             Err(e) => {
-                eprintln!("Error instantiating PVInverter! {e}");
+                error!("Error instantiating PVInverter! {e}");
                 return;
             }
         };
@@ -145,32 +155,32 @@ fn start_get_inverter_task(
             Ok(res) => match res.parse::<u64>() {
                 Ok(res) => res,
                 Err(e) => {
-                    eprintln!("Error parsing INTERVAL_S: {e}");
+                    error!("Error parsing INTERVAL_S: {e}");
                     return;
                 }
             },
             Err(e) => {
-                println!("Error getting INTERVAL_S from env var: {e}");
+                error!("Error getting INTERVAL_S from env var: {e}");
                 return;
             }
         };
         let mut interval = time::interval(time::Duration::from_secs(interval));
 
         loop {
-            println!("tick");
+            debug!("tick");
             interval.tick().await;
             let data = pv_inverter.get_inverter_data().await;
 
             match data {
                 Ok(data) => {
-                    println!("modbus rx");
+                    debug!("modbus rx");
                     match modbus_broadcast_tx.send(data) {
-                        Ok(_res) => println!("sent modbus data into stream"),
-                        Err(e) => eprintln!("error sending data into stream: {e}"),
+                        Ok(_res) => debug!("sent modbus data into stream"),
+                        Err(e) => error!("error sending data into stream: {e}"),
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error getting modbus data: {e}");
+                    error!("Error getting modbus data: {e}");
                 }
             };
         }
@@ -182,11 +192,11 @@ fn start_send_pv_data_heatpump_task(
     mut modbus_broadcast_rx: broadcast::Receiver<PVInverterData>,
 ) {
     join_set.spawn(async move {
-        println!("start_get_pv_surplus_task");
+        info!("start_get_pv_surplus_task");
         let mut heatpump = match Heatpump::new().await {
             Ok(heatpump) => heatpump,
             Err(e) => {
-                eprintln!("Error instantiating Heatpump! {e}");
+                error!("Error instantiating Heatpump! {e}");
                 return;
             }
         };
@@ -209,7 +219,7 @@ fn start_send_pv_data_heatpump_task(
                     let _ = heatpump.set_pv_surplus(pv_surplus_incl_battery).await;
                     let _ = heatpump.set_pv_power(pv_power).await;
                 }
-                Err(e) => eprintln!("Error receiving modbus data from stream! {e}"),
+                Err(e) => error!("Error receiving modbus data from stream! {e}"),
             }
         }
     });
