@@ -1,9 +1,8 @@
-use crate::robust_modbus::RobustContext;
+use crate::robust_modbus::prelude::*;
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use serde::Serialize;
 use std::env;
-use tokio_modbus::prelude::*;
 
 #[derive(Clone, Serialize, Debug)]
 pub struct PVInverterData {
@@ -33,11 +32,22 @@ impl PVInverter {
         Ok(Self { modbus_ctx })
     }
 
-    pub async fn get_inverter_data(&mut self) -> Result<()> {
-        let grid_voltage = self.get_grid_voltage().await?;
-        println!("{grid_voltage}");
-
-        Ok(())
+    pub async fn get_inverter_data(&mut self) -> Result<PVInverterData> {
+        Ok(PVInverterData {
+            timestamp: Utc::now(),
+            device_id: self.get_serial_number().await?,
+            grid_voltage: self.get_grid_voltage().await?,
+            grid_current: self.get_grid_current().await?,
+            grid_power: self.get_grid_power().await?,
+            grid_frequency: self.get_grid_frequency().await?,
+            pv_power_1: self.get_pv_power_1().await?.into(),
+            pv_power_2: self.get_pv_power_2().await?.into(),
+            feedin_power: self.get_feedin_power().await?,
+            battery_charge_power: self.get_battery_charge_power().await?,
+            battery_soc: self.get_battery_soc().await?,
+            radiator_temperature: self.get_radiator_temperature().await?,
+            battery_temperature: self.get_battery_temperature().await?,
+        })
     }
 
     async fn get_battery_charge_voltage(&mut self) -> Result<f32> {
@@ -161,12 +171,10 @@ impl PVInverter {
         Ok(self.modbus_ctx.read_holding_registers(0x0105, 1).await??[0])
     }
 
-    /*
     async fn get_serial_number(&mut self) -> Result<String> {
         let result = self.modbus_ctx.read_holding_registers(0x0, 7).await??;
         Ok(PVInverter::modbus_to_str(&result))
     }
-    */
 
     fn modbus_to_str(data: &Vec<u16>) -> String {
         let mut chars = String::new();

@@ -1,22 +1,15 @@
+use crate::robust_modbus::prelude::*;
 use anyhow::anyhow;
 use std::env;
-use std::net::{SocketAddr, ToSocketAddrs};
-use tokio_modbus::prelude::*;
 
 pub struct Heatpump {
-    modbus_ctx: client::Context,
+    modbus_ctx: RobustContext,
 }
 
 impl Heatpump {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let modbus_tcp_address = env::var("HEATPUMP_MODBUS_TCP_ADDRESS")?
-            .to_socket_addrs()
-            .unwrap()
-            .next()
-            .unwrap();
-
-        let modbus_ctx: client::Context = tcp::connect_slave(modbus_tcp_address, Slave(1)).await?;
-
+        let host = env::var("HEATPUMP_MODBUS_TCP_ADDRESS")?;
+        let modbus_ctx: RobustContext = RobustContext::new(host.as_str(), Slave(1)).await?;
         Ok(Self { modbus_ctx })
     }
 
@@ -32,14 +25,16 @@ impl Heatpump {
         self.modbus_ctx
             .write_multiple_registers(74, &data)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| anyhow!(e))??;
         Ok(())
     }
 
     pub async fn set_pv_power(&mut self, pv_power: f32) -> anyhow::Result<()> {
         dbg!(pv_power);
         let data = idm_float_to_u16(pv_power);
-        self.modbus_ctx.write_multiple_registers(78, &data).await?;
+        self.modbus_ctx
+            .write_multiple_registers(78, &data)
+            .await??;
 
         Ok(())
     }

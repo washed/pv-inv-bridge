@@ -1,8 +1,9 @@
+pub mod prelude;
 mod reader;
-mod registers;
 mod try_read;
+mod try_write;
+mod writer;
 
-use crate::robust_modbus::registers::*;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
@@ -11,13 +12,14 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_modbus::{prelude::*, Result as ModbusResult};
 use tokio_retry::strategy::{jitter, FixedInterval};
 use tokio_retry::Retry;
+use tracing::{error, info};
 
 pub(crate) type Coil = bool;
 pub(crate) type Word = u16;
 
 #[derive(Debug)]
 pub struct RobustContext {
-    socket_address: SocketAddr,
+    host: String,
     slave: Slave,
     slave_sender: mpsc::Sender<Slave>,
     ctx: Arc<Mutex<io::Result<client::Context>>>,
@@ -25,11 +27,6 @@ pub struct RobustContext {
 
 impl RobustContext {
     pub async fn new(host: &str, slave: Slave) -> io::Result<RobustContext> {
-        let socket_address: SocketAddr = host.to_socket_addrs()?.next().ok_or(io::Error::new(
-            io::ErrorKind::AddrNotAvailable,
-            "cannot resolve hostname",
-        ))?;
-
         let ctx = Arc::new(Mutex::new(Err(io::Error::new(
             io::ErrorKind::NotConnected,
             "not yet connected",
@@ -47,11 +44,18 @@ impl RobustContext {
         });
 
         Ok(Self {
-            socket_address,
+            host: host.to_string(),
             slave,
             slave_sender,
             ctx,
         })
+    }
+
+    fn resolve_host(host: &str) -> io::Result<SocketAddr> {
+        host.to_socket_addrs()?.next().ok_or(io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "cannot resolve hostname",
+        ))
     }
 
     fn retry_strategy_connect() -> impl Iterator<Item = Duration> {
@@ -74,15 +78,17 @@ impl RobustContext {
 
     async fn set_context(
         ctx: Arc<Mutex<io::Result<client::Context>>>,
-        addr: SocketAddr,
+        host: &str,
         slave: Slave,
-    ) -> Result<(), ()> {
-        let mut ctx_guard = ctx.lock().await;
-        println!("trying to connect modbus: {:?}", ctx_guard);
-        *ctx_guard = tcp::connect_slave(addr, slave).await;
+    ) -> io::Result<()> {
+        let socket_addr = RobustContext::resolve_host(host)?;
 
-        match *ctx_guard {
-            Err(_) => Err(()),
+        let mut ctx_guard = ctx.lock().await;
+        info!("trying to connect modbus: {:?}", ctx_guard);
+        *ctx_guard = tcp::connect_slave(socket_addr, slave).await;
+
+        match ctx_guard.as_ref() {
+            Err(e) => Err(io::Error::new(e.kind(), e.to_string())),
             Ok(_) => Ok(()),
         }
     }
@@ -102,13 +108,13 @@ impl RobustContext {
 
     async fn refresh_context(
         ctx: Arc<Mutex<io::Result<client::Context>>>,
-        addr: SocketAddr,
+        host: &str,
         slave: Slave,
     ) {
-        let action = || RobustContext::set_context(ctx.clone(), addr, slave);
+        let action = || RobustContext::set_context(ctx.clone(), host, slave);
         match Retry::spawn(RobustContext::retry_strategy_connect(), action).await {
-            Ok(_) => println!("successfully reconnected modbus"),
-            Err(_) => println!("could not reconnect modbus"),
+            Ok(_) => info!("successfully reconnected modbus"),
+            Err(_) => error!("could not reconnect modbus"),
         };
     }
 }

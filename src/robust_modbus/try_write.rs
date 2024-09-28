@@ -1,43 +1,39 @@
 use crate::robust_modbus::{Coil, RobustContext, Word};
 use std::io;
-use tokio_modbus::{prelude::*, Address, Error as ModbusError, Quantity, Result as ModbusResult};
+use tokio_modbus::{prelude::*, Address, Error as ModbusError, Result as ModbusResult};
 
-pub(crate) trait TryRead {
-    type Result;
-
-    async fn try_read(self, robust_ctx: &RobustContext) -> ModbusResult<Vec<Self::Result>>;
+pub(crate) trait TryWrite {
+    async fn try_write(self, robust_ctx: &RobustContext) -> ModbusResult<()>;
 }
 
-pub(crate) struct CoilsRead {
+pub(crate) struct CoilWrite {
     pub addr: Address,
-    pub cnt: Quantity,
+    pub coil: Coil,
 }
 
-pub(crate) struct DiscreteInputsRead {
+pub(crate) struct RegisterWrite {
     pub addr: Address,
-    pub cnt: Quantity,
+    pub word: Word,
 }
 
-pub(crate) struct HoldingRegistersRead {
+pub(crate) struct MultipleCoilsWrite<'a> {
     pub addr: Address,
-    pub cnt: Quantity,
+    pub coils: &'a [Coil],
 }
 
-pub(crate) struct InputRegistersRead {
+pub(crate) struct MultipleRegistersWrite<'a> {
     pub addr: Address,
-    pub cnt: Quantity,
+    pub words: &'a [Word],
 }
 
-pub(crate) struct MultipleRegistersWriteRead<'a> {
-    pub read_addr: Address,
-    pub read_count: Quantity,
-    pub write_addr: Address,
-    pub write_data: &'a [Word],
+pub(crate) struct RegisterMaskedWrite {
+    pub addr: Address,
+    pub and_mask: Word,
+    pub or_mask: Word,
 }
 
-impl TryRead for CoilsRead {
-    type Result = Coil;
-    async fn try_read(self, robust_ctx: &RobustContext) -> ModbusResult<Vec<Self::Result>> {
+impl TryWrite for CoilWrite {
+    async fn try_write(self, robust_ctx: &RobustContext) -> ModbusResult<()> {
         let ctx = robust_ctx.ctx.clone();
         let res = {
             let mut ctx_guard = ctx.lock().await;
@@ -46,7 +42,7 @@ impl TryRead for CoilsRead {
                 .map_err(|e| ModbusError::Transport(io::Error::new(e.kind(), e.to_string())));
 
             match ctx {
-                Ok(ctx) => ctx.read_coils(self.addr, self.cnt).await,
+                Ok(ctx) => ctx.write_single_coil(self.addr, self.coil).await,
                 Err(e) => Err(e),
             }
         };
@@ -59,9 +55,8 @@ impl TryRead for CoilsRead {
     }
 }
 
-impl TryRead for DiscreteInputsRead {
-    type Result = Coil;
-    async fn try_read(self, robust_ctx: &RobustContext) -> ModbusResult<Vec<Self::Result>> {
+impl TryWrite for RegisterWrite {
+    async fn try_write(self, robust_ctx: &RobustContext) -> ModbusResult<()> {
         let ctx = robust_ctx.ctx.clone();
         let res = {
             let mut ctx_guard = ctx.lock().await;
@@ -70,7 +65,7 @@ impl TryRead for DiscreteInputsRead {
                 .map_err(|e| ModbusError::Transport(io::Error::new(e.kind(), e.to_string())));
 
             match ctx {
-                Ok(ctx) => ctx.read_discrete_inputs(self.addr, self.cnt).await,
+                Ok(ctx) => ctx.write_single_register(self.addr, self.word).await,
                 Err(e) => Err(e),
             }
         };
@@ -83,9 +78,8 @@ impl TryRead for DiscreteInputsRead {
     }
 }
 
-impl TryRead for HoldingRegistersRead {
-    type Result = Word;
-    async fn try_read(self, robust_ctx: &RobustContext) -> ModbusResult<Vec<Self::Result>> {
+impl<'a> TryWrite for MultipleCoilsWrite<'a> {
+    async fn try_write(self, robust_ctx: &RobustContext) -> ModbusResult<()> {
         let ctx = robust_ctx.ctx.clone();
         let res = {
             let mut ctx_guard = ctx.lock().await;
@@ -94,7 +88,7 @@ impl TryRead for HoldingRegistersRead {
                 .map_err(|e| ModbusError::Transport(io::Error::new(e.kind(), e.to_string())));
 
             match ctx {
-                Ok(ctx) => ctx.read_holding_registers(self.addr, self.cnt).await,
+                Ok(ctx) => ctx.write_multiple_coils(self.addr, self.coils).await,
                 Err(e) => Err(e),
             }
         };
@@ -107,9 +101,8 @@ impl TryRead for HoldingRegistersRead {
     }
 }
 
-impl TryRead for InputRegistersRead {
-    type Result = Word;
-    async fn try_read(self, robust_ctx: &RobustContext) -> ModbusResult<Vec<Self::Result>> {
+impl<'a> TryWrite for MultipleRegistersWrite<'a> {
+    async fn try_write(self, robust_ctx: &RobustContext) -> ModbusResult<()> {
         let ctx = robust_ctx.ctx.clone();
         let res = {
             let mut ctx_guard = ctx.lock().await;
@@ -118,7 +111,7 @@ impl TryRead for InputRegistersRead {
                 .map_err(|e| ModbusError::Transport(io::Error::new(e.kind(), e.to_string())));
 
             match ctx {
-                Ok(ctx) => ctx.read_input_registers(self.addr, self.cnt).await,
+                Ok(ctx) => ctx.write_multiple_registers(self.addr, self.words).await,
                 Err(e) => Err(e),
             }
         };
@@ -131,9 +124,8 @@ impl TryRead for InputRegistersRead {
     }
 }
 
-impl<'a> TryRead for MultipleRegistersWriteRead<'a> {
-    type Result = Word;
-    async fn try_read(self, robust_ctx: &RobustContext) -> ModbusResult<Vec<Self::Result>> {
+impl TryWrite for RegisterMaskedWrite {
+    async fn try_write(self, robust_ctx: &RobustContext) -> ModbusResult<()> {
         let ctx = robust_ctx.ctx.clone();
         let res = {
             let mut ctx_guard = ctx.lock().await;
@@ -143,13 +135,8 @@ impl<'a> TryRead for MultipleRegistersWriteRead<'a> {
 
             match ctx {
                 Ok(ctx) => {
-                    ctx.read_write_multiple_registers(
-                        self.read_addr,
-                        self.read_count,
-                        self.write_addr,
-                        self.write_data,
-                    )
-                    .await
+                    ctx.masked_write_register(self.addr, self.and_mask, self.or_mask)
+                        .await
                 }
                 Err(e) => Err(e),
             }
