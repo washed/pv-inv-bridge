@@ -1,8 +1,11 @@
-FROM debian:bookworm-slim as main-linux-arm64
-COPY target/aarch64-unknown-linux-gnu/release/pv-inv-bridge /usr/local/bin/pv-inv-bridge
+FROM debian:bookworm-slim
 
-FROM debian:bookworm-slim as main-linux-amd64
-COPY target/release/pv-inv-bridge /usr/local/bin/pv-inv-bridge
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
 
-FROM main-${TARGETOS}-${TARGETARCH}${TARGETVARIANT}
-CMD ["pv-inv-bridge"]
+COPY target/release/pv-inv-bridge /app/pv-inv-bridge
+
+ENTRYPOINT ["/app/pv-inv-bridge"]
