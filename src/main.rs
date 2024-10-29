@@ -17,8 +17,6 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
 use tracing::{debug, error, info, warn};
 
-mod robust_modbus;
-
 mod inverter;
 use inverter::{PVInverter, PVInverterData};
 
